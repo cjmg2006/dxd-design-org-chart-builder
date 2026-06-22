@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
 import { Collapsible } from '@base-ui-components/react/collapsible'
 import { useMediaQuery } from '@base-ui-components/react/unstable-use-media-query'
 import type { Org, Person } from '@/data/types'
@@ -13,6 +21,10 @@ import { cn } from '@/lib/cn'
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 1.4
 const ZOOM_STEP = 0.1
+const ZOOM_FIT = 1 // fit-to-width never upscales past natural size (manual zoom can, up to ZOOM_MAX)
+const FIT_GUTTER_PX = 8 // breathing room subtracted from the pane width when fitting
+const MIN_PANE_HEIGHT = 280 // floor for the canvas pane (~2 card rows) on very short viewports
+const DRAG_THRESHOLD_PX = 4 // pointer travel before a press becomes a pan rather than a click
 
 export function TreeView({ org, query, domain, onSelect }: ViewProps) {
   // Render the lightweight outline on narrow screens — never the wide canvas
@@ -39,7 +51,7 @@ function Header({ org }: { org: Org }) {
     <header>
       <h2 className="text-sm font-semibold text-ink">Reporting hierarchy</h2>
       <p className="mt-1 text-xs text-ink-muted">
-        Who reports to whom, left to right from {org.root.name}. Dashed links are mentorships.
+        Who reports to whom, top-down from {org.root.name}. Drag to pan; dashed links are mentorships.
       </p>
     </header>
   )
@@ -52,7 +64,7 @@ function dimmed(p: Person, query: string, domain: DomainFilter, filtering: boole
   return !isMatch(p, query, domain)
 }
 
-// ── Desktop: drawn left-to-right tree ────────────────────────────────────────
+// ── Desktop: drawn top-down tree on a drag-to-pan canvas ─────────────────────
 function TreeCanvas({
   org,
   query,
@@ -68,6 +80,7 @@ function TreeCanvas({
 }) {
   const [zoom, setZoom] = useState(1)
   const [natural, setNatural] = useState({ w: 0, h: 0 })
+  const [maxH, setMaxH] = useState<number>()
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
 
@@ -80,63 +93,152 @@ function TreeCanvas({
     )
   }, [])
 
-  // Laid out left-to-right, the chart's WIDTH is bounded by the org's depth (a
-  // few levels) while its height grows with headcount. Fit the levels to the pane
-  // width — scaling UP to fill a wide screen (so the chart never floats centred
-  // with empty side gutters) and down to fit a narrow one, within the zoom clamp.
-  // The tall column of people scrolls vertically inside the pane.
+  // Fit the drawn tree to the pane width (clamped); a wide org stays larger than
+  // the pane and is explored by panning. Capped at 1 (never upscale past natural).
   const fit = useCallback(() => {
     const c = containerRef.current
     const cv = canvasRef.current
     if (!c || !cv || !cv.offsetWidth) return
-    const usableW = c.clientWidth - 8 // small safety gutter
-    setZoom(Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, usableW / cv.offsetWidth)) * 100) / 100)
+    const usableW = c.clientWidth - FIT_GUTTER_PX
+    setZoom(Math.round(Math.min(ZOOM_FIT, Math.max(ZOOM_MIN, usableW / cv.offsetWidth)) * 100) / 100)
   }, [])
 
-  // Fit width on load; re-measure on tree-shape changes; re-fit on resize.
-  useEffect(() => {
+  // Size the pane to the real space below its top (viewport − pane top), not a
+  // fixed rem reserve that mis-estimates the header height. A short chart then
+  // fits fully (bottom flush, no clipped cards); only a taller-than-viewport zoom
+  // level scrolls/pans vertically inside the pane.
+  const sizePane = useCallback(() => {
+    const c = containerRef.current
+    if (!c) return
+    setMaxH(Math.max(MIN_PANE_HEIGHT, window.innerHeight - c.getBoundingClientRect().top))
+  }, [])
+
+  // Measure + fit + size the pane before paint (useLayoutEffect avoids a one-frame
+  // flash of an unclamped, full-height pane). Re-measure the canvas on tree-shape
+  // changes; re-fit + re-size on window resize. A document.body ResizeObserver also
+  // re-sizes the pane when layout ABOVE it shifts (e.g. the Legend disclosure
+  // opening), which moves the pane's top but fires no resize event.
+  useLayoutEffect(() => {
     measure()
     fit()
+    sizePane()
     const cv = canvasRef.current
-    const ro = new ResizeObserver(() => measure())
-    if (cv) ro.observe(cv)
-    const onResize = () => fit()
+    const roCanvas = new ResizeObserver(() => measure())
+    if (cv) roCanvas.observe(cv)
+    let raf = 0
+    const roBody = new ResizeObserver(() => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(sizePane) // rAF: measure at a layout-stable moment
+    })
+    roBody.observe(document.body)
+    const onResize = () => {
+      fit()
+      sizePane()
+    }
     window.addEventListener('resize', onResize)
     return () => {
-      ro.disconnect()
+      roCanvas.disconnect()
+      roBody.disconnect()
+      cancelAnimationFrame(raf)
       window.removeEventListener('resize', onResize)
     }
-  }, [measure, fit])
+  }, [measure, fit, sizePane])
 
-  // Subtrees are top-aligned, so the root sits at the top-left of the content.
-  // Reset the pane to the top-left on load so you land on the root, not partway
-  // down a branch (a prior pan/zoom may have moved it). Runs once.
+  // The root sits at the top-centre of a top-down tree. Once fitted, centre the
+  // horizontal scroll on it (and start at the top) so you land on the head of the
+  // org, not a left-hand branch. Runs once.
   const didCenterRef = useRef(false)
   useEffect(() => {
-    if (didCenterRef.current || !natural.h) return
+    if (didCenterRef.current || !natural.w) return
     const c = containerRef.current
     if (!c) return
     const id = requestAnimationFrame(() => {
+      c.scrollLeft = (c.scrollWidth - c.clientWidth) / 2
       c.scrollTop = 0
-      c.scrollLeft = 0
       didCenterRef.current = true
     })
     return () => cancelAnimationFrame(id)
-  }, [natural, zoom])
+    // Depends on natural only — NOT zoom: centering is a one-time landing after the
+    // first measure, and a zoom dep would re-run (and fight the user's pan) on every step.
+  }, [natural])
 
   const zoomOut = () => setZoom((z) => Math.max(ZOOM_MIN, Math.round((z - ZOOM_STEP) * 10) / 10))
   const zoomIn = () => setZoom((z) => Math.min(ZOOM_MAX, Math.round((z + ZOOM_STEP) * 10) / 10))
+
+  // Click-and-drag to pan the canvas (mouse only — touch keeps native scrolling).
+  // A movement threshold separates a pan from a click; a click that follows a real
+  // drag is swallowed so panning never opens a card. Pointer capture keeps the pan
+  // tracking even if the cursor leaves the pane mid-drag.
+  const drag = useRef({ active: false, moved: false, x: 0, y: 0, sl: 0, st: 0 })
+  const suppressClick = useRef(false)
+  const [panning, setPanning] = useState(false)
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return
+    const c = containerRef.current
+    if (!c) return
+    // A fresh press clears any suppressor left armed by a prior drag that ended
+    // without a trailing click (e.g. pointercancel) — so it can never eat a later click.
+    suppressClick.current = false
+    drag.current = { active: true, moved: false, x: e.clientX, y: e.clientY, sl: c.scrollLeft, st: c.scrollTop }
+  }
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current
+    const c = containerRef.current
+    if (!d.active || !c) return
+    const dx = e.clientX - d.x
+    const dy = e.clientY - d.y
+    if (!d.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return // below threshold → still a click
+    if (!d.moved) {
+      d.moved = true
+      setPanning(true)
+      c.setPointerCapture(e.pointerId)
+    }
+    c.scrollLeft = d.sl - dx
+    c.scrollTop = d.st - dy
+  }
+  const endDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current
+    if (!d.active) return
+    if (d.moved) {
+      // Only arm the click-suppressor when a click will actually follow (pointerup).
+      // pointercancel produces no click, so arming it there would eat the next one.
+      suppressClick.current = e.type !== 'pointercancel'
+      setPanning(false)
+      containerRef.current?.releasePointerCapture(e.pointerId)
+    }
+    d.active = false
+  }
+  const onClickCapture = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (suppressClick.current) {
+      e.preventDefault()
+      e.stopPropagation()
+      suppressClick.current = false
+    }
+  }
 
   return (
     <div className="space-y-3">
       <ZoomControls zoom={zoom} onOut={zoomOut} onIn={zoomIn} onReset={fit} />
 
-      {/* A frameless pane that fills the viewport height: the left-to-right chart
-          is taller than the viewport (it grows with headcount), so it scrolls
-          vertically here — the page itself never 2D-scrolls. The inner wrapper is
-          sized to the SCALED dimensions so transform: scale leaves no phantom
-          scroll area; cards carry their own surface, so no frame is needed. */}
-      <div ref={containerRef} className="h-[calc(100vh-22rem)] min-h-[26rem] overflow-auto">
+      {/* A frameless, drag-to-pan canvas. The wide top-down chart can exceed the
+          pane, so it scrolls locally (the page never 2D-scrolls); the pane hugs a
+          short chart and caps at the viewport height when zoomed in. The inner
+          wrapper is sized to the SCALED dimensions so transform: scale leaves no
+          phantom scroll area; cards carry their own surface, so no frame is needed. */}
+      <div
+        ref={containerRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onClickCapture={onClickCapture}
+        style={{ maxHeight: maxH }}
+        className={cn(
+          'touch-pan-x touch-pan-y select-none overflow-auto',
+          panning ? 'cursor-grabbing' : 'cursor-grab',
+        )}
+      >
         <div
           className="mx-auto overflow-hidden"
           style={natural.w ? { width: natural.w * zoom, height: natural.h * zoom } : undefined}
@@ -233,9 +335,9 @@ function TreeNode({
 
   return (
     <Collapsible.Root open={hasChildren ? open : false} onOpenChange={setOpen}>
-      <div className="flex items-start">
-        {/* The card + its expand control (the control sits to the right, toward the team) */}
-        <div className={cn('relative flex shrink-0 items-center gap-1.5 transition-opacity duration-150', isDim && 'opacity-40')}>
+      <div className="flex flex-col items-center">
+        {/* The card + its expand control */}
+        <div className={cn('flex flex-col items-center transition-opacity duration-150', isDim && 'opacity-40')}>
           <div className={cn('w-56', (isRoot || hasChildren) && 'w-60')}>
             <PersonCard
               person={person}
@@ -250,7 +352,7 @@ function TreeNode({
           {hasChildren && (
             <Collapsible.Trigger
               aria-label={open ? `Collapse ${person.name}'s team` : `Expand ${person.name}'s team`}
-              className="group inline-flex h-6 shrink-0 items-center gap-1 rounded-pill border border-border bg-surface px-2 text-2xs font-medium text-ink-secondary transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              className="group mt-1.5 inline-flex h-6 items-center gap-1 rounded-pill border border-border bg-surface px-2 text-2xs font-medium text-ink-secondary transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             >
               <svg
                 aria-hidden
@@ -265,62 +367,65 @@ function TreeNode({
               <span className="tabular">{children.length}</span>
             </Collapsible.Trigger>
           )}
-          {/* stem out of the card's right edge (vertical centre) toward the bus */}
-          {hasChildren && (
-            <span aria-hidden className="absolute left-full top-1/2 h-px w-6 -translate-y-1/2 bg-border" />
-          )}
         </div>
 
-        {/* Children: a column of child nodes to the right, joined by a vertical
-            bus 24px in (where the parent stem lands). Each child's bus segment
-            spans its FULL row box so adjacent segments meet into one continuous
-            line regardless of card heights; the first runs to the top so the
-            stem always meets it, the last is clipped to its centre. Drops run
-            into each child; mentee drops are dashed. Subtrees are TOP-aligned so
-            a manager sits beside their first report rather than floating at the
-            centre of a lopsided subtree. */}
+        {/* Children: a stem from the parent down to a horizontal bus, then a
+            centered row. Each child's bus segment is absolutely positioned to
+            span its FULL column box (incl. the gutter), so adjacent segments
+            meet into one continuous line regardless of card widths; the ends
+            are clipped to a half. Drops are token-coloured; mentees dashed. */}
         {hasChildren && (
           <Collapsible.Panel className="overflow-hidden">
-            <div className="flex flex-col">
-              {children.map((child, i) => {
-                const last = i === children.length - 1
-                const only = children.length === 1
-                return (
-                  <div
-                    key={child.person.name}
-                    className="relative flex items-center py-2 pl-12"
-                  >
-                    {/* vertical bus segment (omit for an only child) */}
-                    {!only && (
+            <div className="flex flex-col items-center">
+              {/* stem from the parent card down to the bus */}
+              <div aria-hidden className="h-5 w-px bg-border" />
+              <div className="flex justify-center">
+                {children.map((child, i) => {
+                  const first = i === 0
+                  const last = i === children.length - 1
+                  const only = children.length === 1
+                  return (
+                    <div
+                      key={child.person.name}
+                      className="relative flex flex-col items-center px-3 pt-5"
+                    >
+                      {/* horizontal bus segment (omit for an only child) */}
+                      {!only && (
+                        <span
+                          aria-hidden
+                          className={cn(
+                            'absolute top-0 h-px bg-border',
+                            first ? 'left-1/2 right-0' : last ? 'left-0 right-1/2' : 'left-0 right-0',
+                          )}
+                        />
+                      )}
+                      {/* vertical drop from the bus into the child card */}
                       <span
                         aria-hidden
                         className={cn(
-                          'absolute left-6 w-px bg-border',
-                          last ? 'top-0 bottom-1/2' : 'inset-y-0',
+                          'absolute left-1/2 top-0 h-5 -translate-x-1/2',
+                          child.mentee
+                            ? 'w-0 border-l border-dashed border-border-strong'
+                            : 'w-px bg-border',
                         )}
                       />
-                    )}
-                    {/* horizontal drop from the bus into the child card */}
-                    <span
-                      aria-hidden
-                      className={cn(
-                        'absolute left-6 top-1/2 w-6 -translate-y-1/2',
-                        child.mentee
-                          ? 'border-t border-dashed border-border-strong'
-                          : 'h-px bg-border',
+                      {child.mentee && (
+                        <span className="mb-1 inline-flex items-center rounded-pill border border-dashed border-border-strong px-2 py-0.5 text-2xs font-medium text-ink-muted">
+                          mentee
+                        </span>
                       )}
-                    />
-                    <TreeNode
-                      person={child.person}
-                      org={org}
-                      query={query}
-                      domain={domain}
-                      filtering={filtering}
-                      onSelect={onSelect}
-                    />
-                  </div>
-                )
-              })}
+                      <TreeNode
+                        person={child.person}
+                        org={org}
+                        query={query}
+                        domain={domain}
+                        filtering={filtering}
+                        onSelect={onSelect}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           </Collapsible.Panel>
         )}
