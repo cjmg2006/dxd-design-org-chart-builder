@@ -39,7 +39,7 @@ function Header({ org }: { org: Org }) {
     <header>
       <h2 className="text-sm font-semibold text-ink">Reporting hierarchy</h2>
       <p className="mt-1 text-xs text-ink-muted">
-        Who reports to whom, top-down from {org.root.name}. Dashed links are mentorships.
+        Who reports to whom, left to right from {org.root.name}. Dashed links are mentorships.
       </p>
     </header>
   )
@@ -52,7 +52,7 @@ function dimmed(p: Person, query: string, domain: DomainFilter, filtering: boole
   return !isMatch(p, query, domain)
 }
 
-// ── Desktop: drawn top-down tree ─────────────────────────────────────────────
+// ── Desktop: drawn left-to-right tree ────────────────────────────────────────
 function TreeCanvas({
   org,
   query,
@@ -80,15 +80,20 @@ function TreeCanvas({
     )
   }, [])
 
+  // Laid out left-to-right, the chart's WIDTH is bounded by the org's depth (a
+  // few levels) while its height grows with headcount. Fit the levels to the pane
+  // width — scaling UP to fill a wide screen (so the chart never floats centred
+  // with empty side gutters) and down to fit a narrow one, within the zoom clamp.
+  // The tall column of people scrolls vertically inside the pane.
   const fit = useCallback(() => {
     const c = containerRef.current
     const cv = canvasRef.current
     if (!c || !cv || !cv.offsetWidth) return
-    const usable = c.clientWidth - 48 // minus the p-6 gutter
-    setZoom(Math.round(Math.min(1, Math.max(ZOOM_MIN, usable / cv.offsetWidth)) * 100) / 100)
+    const usableW = c.clientWidth - 8 // small safety gutter
+    setZoom(Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, usableW / cv.offsetWidth)) * 100) / 100)
   }, [])
 
-  // Fit to width on load; re-measure on tree-shape changes; re-fit on resize.
+  // Fit width on load; re-measure on tree-shape changes; re-fit on resize.
   useEffect(() => {
     measure()
     fit()
@@ -103,15 +108,17 @@ function TreeCanvas({
     }
   }, [measure, fit])
 
-  // Once fitted, centre the horizontal scroll so the root (top of the org) is
-  // what you land on — not a left-hand subtree. Runs once.
+  // Subtrees are top-aligned, so the root sits at the top-left of the content.
+  // Reset the pane to the top-left on load so you land on the root, not partway
+  // down a branch (a prior pan/zoom may have moved it). Runs once.
   const didCenterRef = useRef(false)
   useEffect(() => {
-    if (didCenterRef.current || !natural.w) return
+    if (didCenterRef.current || !natural.h) return
     const c = containerRef.current
     if (!c) return
     const id = requestAnimationFrame(() => {
-      c.scrollLeft = (c.scrollWidth - c.clientWidth) / 2
+      c.scrollTop = 0
+      c.scrollLeft = 0
       didCenterRef.current = true
     })
     return () => cancelAnimationFrame(id)
@@ -124,10 +131,12 @@ function TreeCanvas({
     <div className="space-y-3">
       <ZoomControls zoom={zoom} onOut={zoomOut} onIn={zoomIn} onReset={fit} />
 
-      {/* The canvas can be wider than the viewport on a big org — scroll it
-          locally so the page never 2D-scrolls. The inner wrapper is sized to the
-          SCALED dimensions so transform: scale leaves no phantom scroll area. */}
-      <div ref={containerRef} className="overflow-x-auto rounded-card border border-border bg-surface p-6">
+      {/* A frameless pane that fills the viewport height: the left-to-right chart
+          is taller than the viewport (it grows with headcount), so it scrolls
+          vertically here — the page itself never 2D-scrolls. The inner wrapper is
+          sized to the SCALED dimensions so transform: scale leaves no phantom
+          scroll area; cards carry their own surface, so no frame is needed. */}
+      <div ref={containerRef} className="h-[calc(100vh-22rem)] min-h-[26rem] overflow-auto">
         <div
           className="mx-auto overflow-hidden"
           style={natural.w ? { width: natural.w * zoom, height: natural.h * zoom } : undefined}
@@ -224,9 +233,9 @@ function TreeNode({
 
   return (
     <Collapsible.Root open={hasChildren ? open : false} onOpenChange={setOpen}>
-      <div className="flex flex-col items-center">
-        {/* The card + its expand control */}
-        <div className={cn('flex flex-col items-center transition-opacity duration-150', isDim && 'opacity-40')}>
+      <div className="flex items-start">
+        {/* The card + its expand control (the control sits to the right, toward the team) */}
+        <div className={cn('relative flex shrink-0 items-center gap-1.5 transition-opacity duration-150', isDim && 'opacity-40')}>
           <div className={cn('w-56', (isRoot || hasChildren) && 'w-60')}>
             <PersonCard
               person={person}
@@ -241,7 +250,7 @@ function TreeNode({
           {hasChildren && (
             <Collapsible.Trigger
               aria-label={open ? `Collapse ${person.name}'s team` : `Expand ${person.name}'s team`}
-              className="group mt-1.5 inline-flex h-6 items-center gap-1 rounded-pill border border-border bg-surface px-2 text-2xs font-medium text-ink-secondary transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              className="group inline-flex h-6 shrink-0 items-center gap-1 rounded-pill border border-border bg-surface px-2 text-2xs font-medium text-ink-secondary transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             >
               <svg
                 aria-hidden
@@ -256,65 +265,62 @@ function TreeNode({
               <span className="tabular">{children.length}</span>
             </Collapsible.Trigger>
           )}
+          {/* stem out of the card's right edge (vertical centre) toward the bus */}
+          {hasChildren && (
+            <span aria-hidden className="absolute left-full top-1/2 h-px w-6 -translate-y-1/2 bg-border" />
+          )}
         </div>
 
-        {/* Children: a stem from the parent down to a horizontal bus, then a
-            centered row. Each child's bus segment is absolutely positioned to
-            span its FULL column box (incl. the gutter), so adjacent segments
-            meet into one continuous line regardless of card widths; the ends
-            are clipped to a half. Drops are token-coloured; mentees dashed. */}
+        {/* Children: a column of child nodes to the right, joined by a vertical
+            bus 24px in (where the parent stem lands). Each child's bus segment
+            spans its FULL row box so adjacent segments meet into one continuous
+            line regardless of card heights; the first runs to the top so the
+            stem always meets it, the last is clipped to its centre. Drops run
+            into each child; mentee drops are dashed. Subtrees are TOP-aligned so
+            a manager sits beside their first report rather than floating at the
+            centre of a lopsided subtree. */}
         {hasChildren && (
           <Collapsible.Panel className="overflow-hidden">
-            <div className="flex flex-col items-center">
-              {/* stem from the parent card down to the bus */}
-              <div aria-hidden className="h-5 w-px bg-border" />
-              <div className="flex justify-center">
-                {children.map((child, i) => {
-                  const first = i === 0
-                  const last = i === children.length - 1
-                  const only = children.length === 1
-                  return (
-                    <div
-                      key={child.person.name}
-                      className="relative flex flex-col items-center px-3 pt-5"
-                    >
-                      {/* horizontal bus segment (omit for an only child) */}
-                      {!only && (
-                        <span
-                          aria-hidden
-                          className={cn(
-                            'absolute top-0 h-px bg-border',
-                            first ? 'left-1/2 right-0' : last ? 'left-0 right-1/2' : 'left-0 right-0',
-                          )}
-                        />
-                      )}
-                      {/* vertical drop from the bus into the child card */}
+            <div className="flex flex-col">
+              {children.map((child, i) => {
+                const last = i === children.length - 1
+                const only = children.length === 1
+                return (
+                  <div
+                    key={child.person.name}
+                    className="relative flex items-center py-2 pl-12"
+                  >
+                    {/* vertical bus segment (omit for an only child) */}
+                    {!only && (
                       <span
                         aria-hidden
                         className={cn(
-                          'absolute left-1/2 top-0 h-5 -translate-x-1/2',
-                          child.mentee
-                            ? 'w-0 border-l border-dashed border-border-strong'
-                            : 'w-px bg-border',
+                          'absolute left-6 w-px bg-border',
+                          last ? 'top-0 bottom-1/2' : 'inset-y-0',
                         )}
                       />
-                      {child.mentee && (
-                        <span className="mb-1 inline-flex items-center rounded-pill border border-dashed border-border-strong px-2 py-0.5 text-2xs font-medium text-ink-muted">
-                          mentee
-                        </span>
+                    )}
+                    {/* horizontal drop from the bus into the child card */}
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'absolute left-6 top-1/2 w-6 -translate-y-1/2',
+                        child.mentee
+                          ? 'border-t border-dashed border-border-strong'
+                          : 'h-px bg-border',
                       )}
-                      <TreeNode
-                        person={child.person}
-                        org={org}
-                        query={query}
-                        domain={domain}
-                        filtering={filtering}
-                        onSelect={onSelect}
-                      />
-                    </div>
-                  )
-                })}
-              </div>
+                    />
+                    <TreeNode
+                      person={child.person}
+                      org={org}
+                      query={query}
+                      domain={domain}
+                      filtering={filtering}
+                      onSelect={onSelect}
+                    />
+                  </div>
+                )
+              })}
             </div>
           </Collapsible.Panel>
         )}

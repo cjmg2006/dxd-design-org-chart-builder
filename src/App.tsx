@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useOrg } from './data/useOrg'
 import type { Person } from './data/types'
 import { isMatch, type DomainFilter as DomainFilterValue, type ViewProps } from './lib/filter'
+import { cn } from './lib/cn'
 import { Segmented, type SegOption } from './components/Segmented'
 import { SearchBox } from './components/SearchBox'
 import { DomainFilter } from './components/DomainFilter'
@@ -11,18 +12,23 @@ import { DirectoryView } from './views/DirectoryView'
 import { TreeView } from './views/TreeView'
 import { ExplorerView } from './views/ExplorerView'
 
-type ViewId = 'directory' | 'tree' | 'explorer'
+// Internal ids are kept stable (they appear in shareable ?view= links and match
+// the *View component names); only the labels + order are the user-facing IA:
+//   tree      → "Org Chart"  the drawn reporting hierarchy (the main view)
+//   directory → "Teams"      people grouped by domain → workstream
+//   explorer  → "Directory"  searchable list + focus pane (person lookup)
+type ViewId = 'tree' | 'directory' | 'explorer'
 
 const VIEWS: Record<ViewId, (props: ViewProps) => ReactNode> = {
-  directory: DirectoryView,
   tree: TreeView,
+  directory: DirectoryView,
   explorer: ExplorerView,
 }
 
 const VIEW_OPTIONS: SegOption<ViewId>[] = [
-  { value: 'directory', label: 'Directory', icon: <GridIcon /> },
-  { value: 'tree', label: 'Tree', icon: <TreeIcon /> },
-  { value: 'explorer', label: 'Explorer', icon: <ListIcon /> },
+  { value: 'tree', label: 'Org Chart', icon: <TreeIcon /> },
+  { value: 'directory', label: 'Teams', icon: <GridIcon /> },
+  { value: 'explorer', label: 'Directory', icon: <ListIcon /> },
 ]
 
 export default function App() {
@@ -31,7 +37,7 @@ export default function App() {
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), [])
   const [view, setView] = useState<ViewId>(() => {
     const v = initialParams.get('view')
-    return v && v in VIEWS ? (v as ViewId) : 'directory'
+    return v && v in VIEWS ? (v as ViewId) : 'tree'
   })
   const [query, setQuery] = useState('')
   const [domain, setDomain] = useState<DomainFilterValue>('All')
@@ -58,7 +64,7 @@ export default function App() {
     else params.delete('person')
     window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
     // Distinct, descriptive document title per view / open person (A11Y-9).
-    const viewLabel = VIEW_OPTIONS.find((o) => o.value === view)?.label ?? 'Directory'
+    const viewLabel = VIEW_OPTIONS.find((o) => o.value === view)?.label ?? 'Org Chart'
     document.title = selected
       ? `${selected.name} · DXD Design Team Org Chart`
       : `${viewLabel} · DXD Design Team Org Chart`
@@ -70,6 +76,9 @@ export default function App() {
   )
 
   const ViewComponent = VIEWS[view]
+  // The Org Chart is a wide canvas — let it use the full page width. The other
+  // views read best in a column, so they (and the shared legend) keep the 88rem cap.
+  const wide = view === 'tree'
 
   return (
     <div className="min-h-screen">
@@ -81,7 +90,7 @@ export default function App() {
       </a>
 
       <header className="sticky top-0 z-30 border-b border-border bg-surface/95 backdrop-blur">
-        <div className="mx-auto max-w-[88rem] px-4 py-3 sm:px-6">
+        <div className={cn('px-4 py-3 sm:px-6', !wide && 'mx-auto max-w-[88rem]')}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-2.5">
               <LogoMark />
@@ -108,15 +117,17 @@ export default function App() {
         </div>
       </header>
 
-      <main id="main" className="mx-auto max-w-[88rem] px-4 py-6 sm:px-6">
+      <main id="main" className="px-4 py-6 sm:px-6">
         {status === 'loading' && <LoadingState />}
         {status === 'error' && <ErrorState message={error} onRetry={reload} />}
         {status === 'success' && org && (
           <>
-            <div className="mb-5">
+            <div className={cn('mb-5', !wide && 'mx-auto max-w-[88rem]')}>
               <Legend />
             </div>
-            <ViewComponent org={org} query={query} domain={domain} onSelect={setSelected} />
+            <div className={cn(!wide && 'mx-auto max-w-[88rem]')}>
+              <ViewComponent org={org} query={query} domain={domain} onSelect={setSelected} />
+            </div>
             <PersonDetail
               org={org}
               person={selected}

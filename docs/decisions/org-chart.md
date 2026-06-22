@@ -176,6 +176,53 @@ into one continuous line regardless of card widths. While there, made the Tree f
 leaves no phantom scroll) and centred the initial horizontal scroll on the root, so you land on the
 top of the org instead of a left-hand subtree. token-audit + a11y-static + build remain clean.
 
+**Post-approval IA change — Org Chart as the landing view (user-directed, 2026-06-22).** Wondo
+re-set the top-level navigation. The drawn reporting hierarchy is now the **default** and first
+tab, relabelled **"Org Chart"** (was "Tree"); the domain→workstream grouped view is the second
+tab, relabelled **"Teams"** (was "Directory"); the people-lookup list + focus view is the third
+tab, relabelled **"Directory"** (was "Explorer"). This **supersedes the "defaulting to Directory"
+choice** recorded under *Chosen approach* above — the original rationale was holistic-overview-first;
+the new one is structure-first (the literal org chart is the tool's headline artifact, so it leads).
+Internal view ids (`tree` / `directory` / `explorer`) and the `*View` component names are unchanged,
+so existing `?view=` deep-links still resolve. No in-scope controls were affected; the 320px reflow
+(LAY-2) was re-verified after the relabel — `scrollWidth === clientWidth` at both 320 and 390 px,
+and "Org Chart" wraps to two lines inside its pill only at the 320 floor (still within bounds, 44px
+target preserved). tsc clean.
+
+**Post-approval layout change — Org Chart goes frameless + full-width (user-directed, 2026-06-22).**
+Wondo flagged that the Tree canvas's bordered card (`rounded-card border bg-surface p-6`) boxed the
+chart inside the 88rem reading column and wasted space. Removed the frame entirely — nodes now sit
+straight on the page canvas (`--color-canvas`; the `PersonCard`s carry their own surface, so connector
+contrast is unchanged) — and gave the Org Chart the **full page width** while **Teams / Directory keep
+the 88rem column** (they read best as a bounded grid / master-detail). This is implemented as a
+per-view width: `<main>` and the sticky header no longer hard-cap at `max-w-[88rem]`; instead a
+`wide = view === 'tree'` flag in `App.tsx` applies `mx-auto max-w-[88rem]` to the header, legend, and
+view wrapper for every view *except* the Org Chart, so header chrome and content stay edge-aligned in
+both regimes. Net effect: on a 1920px screen the whole ~35-person org is visible without horizontal
+canvas scroll (was clipped at 88rem); fit-zoom still floors at 50%. LAY-2 re-verified —
+`scrollWidth === clientWidth` at 320 / 1440 / 1920; mobile still falls back to the indented Outline
+(which keeps its own list border by design). tsc clean.
+
+**Post-approval layout change — Org Chart rotated to a left-to-right, top-aligned tree
+(user-directed, 2026-06-22).** Even frameless + full-width, the *top-down* tree wasted the canvas:
+this org is flat (1 root → ~5 leads → ~25 ICs, 3–4 levels), so top-down it was a ~6800×710px strip —
+one node at the apex over a ~25-wide base, leaving large empty triangles around the root that no zoom
+could fix (scaling only resized the emptiness). Rotated the desktop tree 90° to **left-to-right**: the
+many people stack *down* the page (filling the tall canvas) while the few levels run *across* (bounded
+width, fits with no horizontal scroll). Subtrees are **top-aligned**, not centred, so each manager sits
+beside their first report instead of floating at the centre of a lopsided subtree (centring scattered
+Keith's reports vertically and re-introduced the "weird gaps"). The canvas is now a frameless,
+viewport-height **pane** that scrolls vertically; `fit()` scales the levels to the pane *width* (within
+the 0.5–1.4 clamp, scaling **up** to fill wide screens so the chart never floats centred with side
+gutters), and the pane resets to top-left (the root) on load. Connectors were rebuilt for the rotation:
+a stem from each card's right edge to a vertical bus 24px in, the bus spanning from the column top
+(so the parent stem always meets it) down to the last child's centre, with horizontal drops into each
+child (mentee drops dashed). The narrow-screen **Outline is unchanged** (it was already a vertical,
+space-filling layout). Residual empty space is now only the lower-left wedge inherent to any single-root
+hierarchy (the team fans out below-right of the sole root) — the dense, scannable alternatives remain the
+**Teams** and **Directory** views. Verified: `tsc` + `npm run build` clean; no horizontal page scroll at
+320 / 1440 / 1920 (`scrollWidth === clientWidth`); fit = 112% @1440, 140% (clamp) @1920; mobile Outline intact.
+
 ## Ratchet
 
 The evaluator's first pass surfaced a defect **no in-scope control covered**: demo/test URL
