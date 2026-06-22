@@ -223,6 +223,30 @@ hierarchy (the team fans out below-right of the sole root) — the dense, scanna
 **Teams** and **Directory** views. Verified: `tsc` + `npm run build` clean; no horizontal page scroll at
 320 / 1440 / 1920 (`scrollWidth === clientWidth`); fit = 112% @1440, 140% (clamp) @1920; mobile Outline intact.
 
+**Post-approval layout change — back to top-down + drag-to-pan canvas (user-directed, 2026-06-22).**
+Wondo preferred the **vertical top-down** orientation (head of design on top) over left-to-right, and
+asked for **click-and-hold drag panning** as the natural way to move the canvas. Reverted the desktop
+`TreeNode` to top-down (root at top-centre, children in a centred row below, the original bus/drop
+connectors); `fit()` is fit-to-width again (clamped, capped at natural size); on load it centres the
+horizontal scroll on the root. Added **mouse drag-to-pan** (pointer events on the pane: a 4px threshold
+separates a pan from a click, a real drag's trailing click is suppressed so panning never opens a card,
+touch keeps native scroll). The pane is sized to the **real space below its top** (`window.innerHeight −
+paneTop`, floored) so a short chart fits flush with no clipped bottom cards and only taller-than-viewport
+zooms scroll inside the pane.
+
+> **Empty-space verdict (ce-code-review, 2026-06-22):** Wondo repeatedly flagged whitespace around the
+> nodes. A four-persona review (correctness/frontend-races/maintainability/typescript) plus DOM
+> measurement confirmed it is **inherent geometry, not a bug** — a single-root centred top-down tree is a
+> pyramid (one head over a ~25-wide base), so the upper-left/right corners are empty by construction; no
+> stray padding/gutter inflates it. Eliminating the corners requires abandoning "head on top" (radial /
+> treemap centre the head) or relocating the gap (left-align / left-to-right). Left as-is; the **Teams**
+> and **Directory** views remain the dense, gap-free layouts. The review also caught and **fixed** real
+> bugs in the new pan/sizing code: click-suppressor leaking on `pointercancel` (eats the next click →
+> cleared on next `pointerdown`, not armed on cancel); stale pane height when the Legend disclosure
+> expands (→ `document.body` ResizeObserver re-sizes); centring effect re-firing on `zoom` (→ dep
+> removed); first-paint flash (→ `useLayoutEffect`); plus magic-number constants and a stray optional
+> chain. `tsc` + `npm run build` clean; drag/click/legend-resize verified in-browser.
+
 ## Ratchet
 
 The evaluator's first pass surfaced a defect **no in-scope control covered**: demo/test URL
