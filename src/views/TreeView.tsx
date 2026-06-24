@@ -13,6 +13,7 @@ import { Collapsible } from '@base-ui-components/react/collapsible'
 import { useMediaQuery } from '@base-ui-components/react/unstable-use-media-query'
 import type { Org, Person } from '@/data/types'
 import { reportsOf, menteesOf, descendantCount } from '@/data/org'
+import { useOrgEditsContext } from '@/data/orgEdits'
 import { isMatch, type DomainFilter, type ViewProps } from '@/lib/filter'
 import { statusShort } from '@/lib/styles'
 import { PersonCard } from '@/components/PersonCard'
@@ -30,37 +31,7 @@ import {
   type LaidOutNode,
 } from '@/lib/treeLayout'
 
-// Persisted custom arrangement, keyed by person name:
-//   positions — cards the user has dragged ({x,y})
-//   managers  — people the user has re-parented (new "Reports to" target)
-// Only customised people are stored; everyone else falls back to the sheet's
-// hierarchy and the computed tidy layout, so the chart survives sheet changes.
 type PosMap = Record<string, { x: number; y: number }>
-type MgrMap = Record<string, string>
-interface SavedLayout {
-  positions: PosMap
-  managers: MgrMap
-}
-const LAYOUT_KEY = 'dxd-orgchart-layout-v3'
-const EMPTY_LAYOUT: SavedLayout = { positions: {}, managers: {} }
-
-function loadLayout(): SavedLayout {
-  try {
-    const raw = localStorage.getItem(LAYOUT_KEY)
-    if (!raw) return EMPTY_LAYOUT
-    const parsed = JSON.parse(raw) as Partial<SavedLayout>
-    return { positions: parsed.positions ?? {}, managers: parsed.managers ?? {} }
-  } catch {
-    return EMPTY_LAYOUT
-  }
-}
-function saveLayout(l: SavedLayout) {
-  try {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l))
-  } catch {
-    /* storage unavailable (private mode / quota) — layout just won't persist */
-  }
-}
 
 const SCALE_MIN = 0.1 // zoomed all the way out
 const SCALE_MAX = 2 // zoomed all the way in
@@ -133,31 +104,10 @@ function TreeCanvas({
 
   // Edit mode: switch the static tree for a positioned, draggable graph whose
   // reporting lines re-route live as cards move — and where a card's manager can
-  // be changed via its "Reports to" control. Both are persisted per browser.
+  // be changed via its "Reports to" control. Edits are persisted per browser and
+  // shared with the detail dialog via the app-wide edits store.
   const [editing, setEditing] = useState(false)
-  const [layout, setLayout] = useState<SavedLayout>(loadLayout)
-  useEffect(() => saveLayout(layout), [layout])
-  // A dragged card commits its new position, keyed by person name.
-  const commitNode = useCallback(
-    (name: string, x: number, y: number) =>
-      setLayout((l) => ({ ...l, positions: { ...l.positions, [name]: { x, y } } })),
-    [],
-  )
-  // A "Reports to" change re-parents a person. Passing the sheet's original
-  // manager clears the override (back to the source-of-truth line).
-  const reparent = useCallback(
-    (name: string, newManager: string, originalManager: string | null) =>
-      setLayout((l) => {
-        const managers = { ...l.managers }
-        if (newManager === (originalManager ?? '')) delete managers[name]
-        else managers[name] = newManager
-        return { ...l, managers }
-      }),
-    [],
-  )
-  const resetLayout = useCallback(() => setLayout(EMPTY_LAYOUT), [])
-  const hasCustomLayout =
-    Object.keys(layout.positions).length > 0 || Object.keys(layout.managers).length > 0
+  const { edits, baseOrg, commitNode, reparent, reset, hasEdits } = useOrgEditsContext()
   // Drag math converts pointer pixels → content units, so it needs the live scale.
   const getScale = useCallback(() => view.current.scale, [])
 
@@ -363,12 +313,12 @@ function TreeCanvas({
         {editing ? (
           <PositionedTree
             org={org}
+            baseOrg={baseOrg}
             query={query}
             domain={domain}
             filtering={filtering}
             onSelect={onSelect}
-            positions={layout.positions}
-            managers={layout.managers}
+            positions={edits.positions}
             getScale={getScale}
             onCommitNode={commitNode}
             onReparent={reparent}
@@ -387,9 +337,9 @@ function TreeCanvas({
 
       <EditToolbar
         editing={editing}
-        canReset={hasCustomLayout}
+        canReset={hasEdits}
         onToggle={() => setEditing((v) => !v)}
-        onReset={resetLayout}
+        onReset={reset}
       />
       <p className="pointer-events-none absolute right-3 top-12 text-2xs text-ink-muted">
         {editing
@@ -421,7 +371,7 @@ function EditToolbar({
           onClick={onReset}
           className="inline-flex h-8 items-center rounded-chip border border-border bg-surface px-2.5 text-xs font-medium text-ink-secondary shadow-sm transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         >
-          Reset layout
+          Reset edits
         </button>
       )}
       <button
@@ -518,48 +468,54 @@ function CanvasControls({
 // ── Edit mode: positioned, draggable graph with live-routing reporting lines ──
 function PositionedTree({
   org,
+  baseOrg,
   query,
   domain,
   filtering,
   onSelect,
   positions,
-  managers,
   getScale,
   onCommitNode,
   onReparent,
 }: {
   org: Org
+  baseOrg: Org | null
   query: string
   domain: DomainFilter
   filtering: boolean
   onSelect: (p: Person) => void
   positions: PosMap
-  managers: MgrMap
   getScale: () => number
   onCommitNode: (name: string, x: number, y: number) => void
   onReparent: (name: string, newManager: string, originalManager: string | null) => void
 }) {
-  // Apply the manager overrides to the sheet hierarchy, yielding the effective
-  // child lists the layout runs over, plus a child→manager lookup.
+  // The effective org already has manager overrides baked in, so the child lists
+  // and child→manager lookup read straight off it (no re-merging here).
   const { getChildren, managerOf } = useMemo(() => {
     const children = new Map<string, Child[]>()
     const mgrOf = new Map<string, string | null>()
     for (const p of [...org.people, ...org.openRoles]) {
-      const overridden = Object.prototype.hasOwnProperty.call(managers, p.name)
-      const mgr = overridden ? managers[p.name] : p.managerName
-      mgrOf.set(p.name, mgr)
-      if (!mgr) continue
-      const mentee = overridden ? false : p.isMentored // a manual line is a hard report
-      const arr = children.get(mgr)
-      if (arr) arr.push({ person: p, mentee })
-      else children.set(mgr, [{ person: p, mentee }])
+      mgrOf.set(p.name, p.managerName)
+      if (!p.managerName) continue
+      const entry = { person: p, mentee: p.isMentored }
+      const arr = children.get(p.managerName)
+      if (arr) arr.push(entry)
+      else children.set(p.managerName, [entry])
     }
     for (const arr of children.values()) arr.sort((a, b) => Number(a.mentee) - Number(b.mentee))
     return {
       getChildren: (name: string): Child[] => children.get(name) ?? [],
       managerOf: (name: string): string | null => mgrOf.get(name) ?? null,
     }
-  }, [org, managers])
+  }, [org])
+
+  // The original (sheet) manager per person — selecting it in the picker clears
+  // the override. Sourced from the unedited base org.
+  const baseManagerOf = useMemo(() => {
+    const m = new Map<string, string | null>()
+    if (baseOrg) for (const p of [...baseOrg.people, ...baseOrg.openRoles]) m.set(p.name, p.managerName)
+    return (name: string): string | null => m.get(name) ?? null
+  }, [baseOrg])
 
   const layout = useMemo(() => computeLayout(org.root, getChildren), [org.root, getChildren])
   const nodeById = useMemo(() => new Map(layout.nodes.map((n) => [n.id, n])), [layout])
@@ -691,7 +647,7 @@ function PositionedTree({
 
       {layout.nodes.map((n) => {
         const p = posById(n.id)
-        const original = n.person.managerName
+        const original = baseManagerOf(n.person.name)
         const current = managerOf(n.person.name)
         return (
           <DraggableNode

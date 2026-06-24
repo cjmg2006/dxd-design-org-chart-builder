@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useOrg } from './data/useOrg'
+import { applyEdits } from './data/org'
+import { OrgEditsProvider, useOrgEdits } from './data/orgEdits'
 import type { Person } from './data/types'
 import { isMatch, type DomainFilter as DomainFilterValue, type ViewProps } from './lib/filter'
 import { cn } from './lib/cn'
@@ -33,6 +35,15 @@ const VIEW_OPTIONS: SegOption<ViewId>[] = [
 
 export default function App() {
   const { status, org, error, reload } = useOrg()
+  // User overrides (re-parent / re-domain / re-product, drag positions), shared
+  // between the edit canvas and the detail dialog and baked into one effective
+  // org so every view reflects them.
+  const editsApi = useOrgEdits()
+  const effectiveOrg = useMemo(
+    () => (org ? applyEdits(org, editsApi.edits) : null),
+    [org, editsApi.edits],
+  )
+  const editsValue = useMemo(() => ({ ...editsApi, baseOrg: org }), [editsApi, org])
   // Capture deep-link params once on mount, before any URL sync runs.
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), [])
   const [view, setView] = useState<ViewId>(() => {
@@ -47,12 +58,12 @@ export default function App() {
   // Deep-link: resolve ?person once the org has loaded (using the slug captured
   // on mount, so the URL-sync effect below can't wipe it first).
   useEffect(() => {
-    if (org && pendingPerson.current) {
-      const p = org.bySlug.get(pendingPerson.current)
+    if (effectiveOrg && pendingPerson.current) {
+      const p = effectiveOrg.bySlug.get(pendingPerson.current)
       if (p) setSelected(p)
       pendingPerson.current = null
     }
-  }, [org])
+  }, [effectiveOrg])
 
   // Sync view + selected person to the URL (shareable links). Gated on the org
   // being loaded so it never clears the initial ?person before it's resolved.
@@ -71,8 +82,8 @@ export default function App() {
   }, [view, selected, org])
 
   const resultCount = useMemo(
-    () => (org ? org.people.filter((p) => isMatch(p, query, domain)).length : 0),
-    [org, query, domain],
+    () => (effectiveOrg ? effectiveOrg.people.filter((p) => isMatch(p, query, domain)).length : 0),
+    [effectiveOrg, query, domain],
   )
 
   const ViewComponent = VIEWS[view]
@@ -120,21 +131,21 @@ export default function App() {
       <main id="main" className="px-4 py-6 sm:px-6">
         {status === 'loading' && <LoadingState />}
         {status === 'error' && <ErrorState message={error} onRetry={reload} />}
-        {status === 'success' && org && (
-          <>
+        {status === 'success' && effectiveOrg && (
+          <OrgEditsProvider value={editsValue}>
             <div className={cn('mb-5', !wide && 'mx-auto max-w-[88rem]')}>
               <Legend />
             </div>
             <div className={cn(!wide && 'mx-auto max-w-[88rem]')}>
-              <ViewComponent org={org} query={query} domain={domain} onSelect={setSelected} />
+              <ViewComponent org={effectiveOrg} query={query} domain={domain} onSelect={setSelected} />
             </div>
             <PersonDetail
-              org={org}
+              org={effectiveOrg}
               person={selected}
               onClose={() => setSelected(null)}
               onNavigate={(p) => setSelected(p)}
             />
-          </>
+          </OrgEditsProvider>
         )}
       </main>
 
