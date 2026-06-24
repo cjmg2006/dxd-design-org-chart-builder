@@ -1,7 +1,9 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -17,13 +19,55 @@ import { PersonCard } from '@/components/PersonCard'
 import { DomainDot, EmploymentBadge, Initials, StatusPill } from '@/components/primitives'
 import { SpecialtyIcon } from '@/components/SpecialtyIcon'
 import { cn } from '@/lib/cn'
+import {
+  computeLayout,
+  edgeKey,
+  edgePath,
+  NODE_H,
+  NODE_W,
+  type Child,
+  type Edge,
+  type LaidOutNode,
+} from '@/lib/treeLayout'
 
-const ZOOM_MIN = 0.5
-const ZOOM_MAX = 1.4
-const ZOOM_STEP = 0.1
-const ZOOM_FIT = 1 // fit-to-width never upscales past natural size (manual zoom can, up to ZOOM_MAX)
-const FIT_GUTTER_PX = 8 // breathing room subtracted from the pane width when fitting
-const MIN_PANE_HEIGHT = 280 // floor for the canvas pane (~2 card rows) on very short viewports
+// Persisted custom arrangement, keyed by person name:
+//   positions — cards the user has dragged ({x,y})
+//   managers  — people the user has re-parented (new "Reports to" target)
+// Only customised people are stored; everyone else falls back to the sheet's
+// hierarchy and the computed tidy layout, so the chart survives sheet changes.
+type PosMap = Record<string, { x: number; y: number }>
+type MgrMap = Record<string, string>
+interface SavedLayout {
+  positions: PosMap
+  managers: MgrMap
+}
+const LAYOUT_KEY = 'dxd-orgchart-layout-v3'
+const EMPTY_LAYOUT: SavedLayout = { positions: {}, managers: {} }
+
+function loadLayout(): SavedLayout {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY)
+    if (!raw) return EMPTY_LAYOUT
+    const parsed = JSON.parse(raw) as Partial<SavedLayout>
+    return { positions: parsed.positions ?? {}, managers: parsed.managers ?? {} }
+  } catch {
+    return EMPTY_LAYOUT
+  }
+}
+function saveLayout(l: SavedLayout) {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l))
+  } catch {
+    /* storage unavailable (private mode / quota) — layout just won't persist */
+  }
+}
+
+const SCALE_MIN = 0.1 // zoomed all the way out
+const SCALE_MAX = 2 // zoomed all the way in
+const ZOOM_BTN_STEP = 1.5 // +/- button zoom factor (snappier steps)
+const ZOOM_WHEEL_RATE = 0.003 // pinch / ⌘-scroll zoom sensitivity per wheel delta
+const FIT_PAD = 56 // breathing room around the chart when zooming to fit
+const MIN_BOARD_HEIGHT = 360 // floor for the canvas board height on short viewports
 const DRAG_THRESHOLD_PX = 4 // pointer travel before a press becomes a pan rather than a click
 
 export function TreeView({ org, query, domain, onSelect }: ViewProps) {
@@ -51,7 +95,7 @@ function Header({ org }: { org: Org }) {
     <header>
       <h2 className="text-sm font-semibold text-ink">Reporting hierarchy</h2>
       <p className="mt-1 text-xs text-ink-muted">
-        Who reports to whom, top-down from {org.root.name}. Drag to pan; dashed links are mentorships.
+        Who reports to whom, top-down from {org.root.name}. Dashed links are mentorships.
       </p>
     </header>
   )
@@ -64,7 +108,7 @@ function dimmed(p: Person, query: string, domain: DomainFilter, filtering: boole
   return !isMatch(p, query, domain)
 }
 
-// ── Desktop: drawn top-down tree on a drag-to-pan canvas ─────────────────────
+// ── Desktop: pan/zoom canvas board (Miro/FigJam-style) holding the top-down tree ──
 function TreeCanvas({
   org,
   query,
@@ -78,134 +122,199 @@ function TreeCanvas({
   filtering: boolean
   onSelect: (p: Person) => void
 }) {
-  const [zoom, setZoom] = useState(1)
-  const [natural, setNatural] = useState({ w: 0, h: 0 })
-  const [maxH, setMaxH] = useState<number>()
-  const containerRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLDivElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  // Current transform, kept in a ref and written to the DOM imperatively so panning
+  // and zooming never re-render the (large) tree — only the transform changes.
+  const view = useRef({ x: 0, y: 0, scale: 1 })
+  const userMoved = useRef(false) // once true, stop auto-refitting on a content reflow
+  const [zoomPct, setZoomPct] = useState(100)
+  const [panning, setPanning] = useState(false)
 
-  // offsetWidth/Height are transform-invariant → always the natural size.
-  const measure = useCallback(() => {
-    const cv = canvasRef.current
+  // Edit mode: switch the static tree for a positioned, draggable graph whose
+  // reporting lines re-route live as cards move — and where a card's manager can
+  // be changed via its "Reports to" control. Both are persisted per browser.
+  const [editing, setEditing] = useState(false)
+  const [layout, setLayout] = useState<SavedLayout>(loadLayout)
+  useEffect(() => saveLayout(layout), [layout])
+  // A dragged card commits its new position, keyed by person name.
+  const commitNode = useCallback(
+    (name: string, x: number, y: number) =>
+      setLayout((l) => ({ ...l, positions: { ...l.positions, [name]: { x, y } } })),
+    [],
+  )
+  // A "Reports to" change re-parents a person. Passing the sheet's original
+  // manager clears the override (back to the source-of-truth line).
+  const reparent = useCallback(
+    (name: string, newManager: string, originalManager: string | null) =>
+      setLayout((l) => {
+        const managers = { ...l.managers }
+        if (newManager === (originalManager ?? '')) delete managers[name]
+        else managers[name] = newManager
+        return { ...l, managers }
+      }),
+    [],
+  )
+  const resetLayout = useCallback(() => setLayout(EMPTY_LAYOUT), [])
+  const hasCustomLayout =
+    Object.keys(layout.positions).length > 0 || Object.keys(layout.managers).length > 0
+  // Drag math converts pointer pixels → content units, so it needs the live scale.
+  const getScale = useCallback(() => view.current.scale, [])
+
+  const clampScale = (s: number) => Math.min(SCALE_MAX, Math.max(SCALE_MIN, s))
+
+  // Keep at least a margin of the chart on-screen so it can't be lost off the board.
+  const clampXY = (x: number, y: number, scale: number) => {
+    const vp = viewportRef.current
+    const cv = contentRef.current
+    if (!vp || !cv) return { x, y }
+    const m = 80
+    return {
+      x: Math.min(vp.clientWidth - m, Math.max(m - cv.offsetWidth * scale, x)),
+      y: Math.min(vp.clientHeight - m, Math.max(m - cv.offsetHeight * scale, y)),
+    }
+  }
+
+  const apply = () => {
+    const cv = contentRef.current
     if (!cv) return
-    setNatural((n) =>
-      n.w === cv.offsetWidth && n.h === cv.offsetHeight ? n : { w: cv.offsetWidth, h: cv.offsetHeight },
-    )
+    const { x, y, scale } = view.current
+    cv.style.transform = `translate(${x}px, ${y}px) scale(${scale})`
+  }
+
+  // Commit a (clamped) transform and paint it imperatively — no React re-render.
+  const setView = (x: number, y: number, scale: number) => {
+    const s = clampScale(scale)
+    const p = clampXY(x, y, s)
+    view.current = { x: p.x, y: p.y, scale: s }
+    apply()
+  }
+
+  // Zoom while keeping the viewport point (px, py) fixed under the cursor.
+  const zoomAt = (px: number, py: number, nextScale: number) => {
+    const s = clampScale(nextScale)
+    const k = s / view.current.scale
+    setView(px - (px - view.current.x) * k, py - (py - view.current.y) * k, s)
+    setZoomPct(Math.round(s * 100))
+  }
+
+  // Fill the board to the viewport below its top (imperative height → no flash).
+  const sizeBoard = useCallback(() => {
+    const vp = viewportRef.current
+    if (!vp) return
+    vp.style.height = `${Math.max(MIN_BOARD_HEIGHT, window.innerHeight - vp.getBoundingClientRect().top - 16)}px`
   }, [])
 
-  // Fit the drawn tree to the pane width (clamped); a wide org stays larger than
-  // the pane and is explored by panning. Capped at 1 (never upscale past natural).
+  // Zoom-to-fit the whole chart, centred — the opening view and the reset action.
   const fit = useCallback(() => {
-    const c = containerRef.current
-    const cv = canvasRef.current
-    if (!c || !cv || !cv.offsetWidth) return
-    const usableW = c.clientWidth - FIT_GUTTER_PX
-    setZoom(Math.round(Math.min(ZOOM_FIT, Math.max(ZOOM_MIN, usableW / cv.offsetWidth)) * 100) / 100)
+    const vp = viewportRef.current
+    const cv = contentRef.current
+    if (!vp || !cv || !cv.offsetWidth) return
+    const s = clampScale(
+      Math.min((vp.clientWidth - FIT_PAD) / cv.offsetWidth, (vp.clientHeight - FIT_PAD) / cv.offsetHeight),
+    )
+    view.current = {
+      x: (vp.clientWidth - cv.offsetWidth * s) / 2,
+      y: (vp.clientHeight - cv.offsetHeight * s) / 2,
+      scale: s,
+    }
+    apply()
+    setZoomPct(Math.round(s * 100))
   }, [])
 
-  // Size the pane to the real space below its top (viewport − pane top), not a
-  // fixed rem reserve that mis-estimates the header height. A short chart then
-  // fits fully (bottom flush, no clipped cards); only a taller-than-viewport zoom
-  // level scrolls/pans vertically inside the pane.
-  const sizePane = useCallback(() => {
-    const c = containerRef.current
-    if (!c) return
-    setMaxH(Math.max(MIN_PANE_HEIGHT, window.innerHeight - c.getBoundingClientRect().top))
-  }, [])
-
-  // Measure + fit + size the pane before paint (useLayoutEffect avoids a one-frame
-  // flash of an unclamped, full-height pane). Re-measure the canvas on tree-shape
-  // changes; re-fit + re-size on window resize. A document.body ResizeObserver also
-  // re-sizes the pane when layout ABOVE it shifts (e.g. the Legend disclosure
-  // opening), which moves the pane's top but fires no resize event.
+  // Size the board, then fit the chart into it — before paint, so nothing unfitted flashes.
   useLayoutEffect(() => {
-    measure()
+    sizeBoard()
     fit()
-    sizePane()
-    const cv = canvasRef.current
-    const roCanvas = new ResizeObserver(() => measure())
-    if (cv) roCanvas.observe(cv)
+  }, [sizeBoard, fit])
+
+  // Entering/leaving edit mode deliberately keeps the current zoom & pan — the
+  // user stays focused where they were rather than snapping back to fit-all.
+
+  // Keep the board sized on resize and on layout shifts above it (e.g. the Legend
+  // disclosure). Re-fit only while the user hasn't moved the canvas, so a late
+  // content reflow (fonts/data) lands centred without overriding their view.
+  useEffect(() => {
+    const cv = contentRef.current
     let raf = 0
-    const roBody = new ResizeObserver(() => {
+    const roContent = new ResizeObserver(() => {
+      if (userMoved.current) return
       cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(sizePane) // rAF: measure at a layout-stable moment
+      raf = requestAnimationFrame(fit)
+    })
+    if (cv) roContent.observe(cv)
+    const roBody = new ResizeObserver(() => {
+      sizeBoard()
+      if (!userMoved.current) fit()
     })
     roBody.observe(document.body)
     const onResize = () => {
-      fit()
-      sizePane()
+      sizeBoard()
+      if (userMoved.current) setView(view.current.x, view.current.y, view.current.scale)
+      else fit()
     }
     window.addEventListener('resize', onResize)
     return () => {
-      roCanvas.disconnect()
+      roContent.disconnect()
       roBody.disconnect()
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', onResize)
     }
-  }, [measure, fit, sizePane])
+  }, [sizeBoard, fit])
 
-  // The root sits at the top-centre of a top-down tree. Once fitted, centre the
-  // horizontal scroll on it (and start at the top) so you land on the head of the
-  // org, not a left-hand branch. Runs once.
-  const didCenterRef = useRef(false)
+  // Wheel: two-finger swipe / wheel pans; pinch or ⌘/Ctrl-scroll zooms to the cursor.
+  // Native non-passive listener so preventDefault stops the page itself from scrolling.
   useEffect(() => {
-    if (didCenterRef.current || !natural.w) return
-    const c = containerRef.current
-    if (!c) return
-    const id = requestAnimationFrame(() => {
-      c.scrollLeft = (c.scrollWidth - c.clientWidth) / 2
-      c.scrollTop = 0
-      didCenterRef.current = true
-    })
-    return () => cancelAnimationFrame(id)
-    // Depends on natural only — NOT zoom: centering is a one-time landing after the
-    // first measure, and a zoom dep would re-run (and fight the user's pan) on every step.
-  }, [natural])
+    const vp = viewportRef.current
+    if (!vp) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      userMoved.current = true
+      if (e.ctrlKey || e.metaKey) {
+        const r = vp.getBoundingClientRect()
+        zoomAt(e.clientX - r.left, e.clientY - r.top, view.current.scale * Math.exp(-e.deltaY * ZOOM_WHEEL_RATE))
+      } else {
+        setView(view.current.x - e.deltaX, view.current.y - e.deltaY, view.current.scale)
+      }
+    }
+    vp.addEventListener('wheel', onWheel, { passive: false })
+    return () => vp.removeEventListener('wheel', onWheel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- zoomAt/setView read live refs; set up once
+  }, [])
 
-  const zoomOut = () => setZoom((z) => Math.max(ZOOM_MIN, Math.round((z - ZOOM_STEP) * 10) / 10))
-  const zoomIn = () => setZoom((z) => Math.min(ZOOM_MAX, Math.round((z + ZOOM_STEP) * 10) / 10))
-
-  // Click-and-drag to pan the canvas (mouse only — touch keeps native scrolling).
-  // A movement threshold separates a pan from a click; a click that follows a real
-  // drag is swallowed so panning never opens a card. Pointer capture keeps the pan
-  // tracking even if the cursor leaves the pane mid-drag.
-  const drag = useRef({ active: false, moved: false, x: 0, y: 0, sl: 0, st: 0 })
+  // Drag to pan (mouse, touch, or pen). A threshold separates a pan from a click,
+  // and a real drag's trailing click is suppressed so panning never opens a card.
+  const drag = useRef({ active: false, moved: false, x: 0, y: 0, vx: 0, vy: 0 })
   const suppressClick = useRef(false)
-  const [panning, setPanning] = useState(false)
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.pointerType !== 'mouse' || e.button !== 0) return
-    const c = containerRef.current
-    if (!c) return
-    // A fresh press clears any suppressor left armed by a prior drag that ended
-    // without a trailing click (e.g. pointercancel) — so it can never eat a later click.
+    if (e.button !== 0) return
     suppressClick.current = false
-    drag.current = { active: true, moved: false, x: e.clientX, y: e.clientY, sl: c.scrollLeft, st: c.scrollTop }
+    drag.current = { active: true, moved: false, x: e.clientX, y: e.clientY, vx: view.current.x, vy: view.current.y }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = drag.current
-    const c = containerRef.current
-    if (!d.active || !c) return
+    if (!d.active) return
     const dx = e.clientX - d.x
     const dy = e.clientY - d.y
     if (!d.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return // below threshold → still a click
     if (!d.moved) {
       d.moved = true
+      userMoved.current = true
       setPanning(true)
-      c.setPointerCapture(e.pointerId)
+      viewportRef.current?.setPointerCapture(e.pointerId)
     }
-    c.scrollLeft = d.sl - dx
-    c.scrollTop = d.st - dy
+    setView(d.vx + dx, d.vy + dy, view.current.scale)
   }
   const endDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = drag.current
     if (!d.active) return
     if (d.moved) {
-      // Only arm the click-suppressor when a click will actually follow (pointerup).
+      // Only arm the click-suppressor when a click will follow (pointerup); a
       // pointercancel produces no click, so arming it there would eat the next one.
       suppressClick.current = e.type !== 'pointercancel'
       setPanning(false)
-      containerRef.current?.releasePointerCapture(e.pointerId)
+      viewportRef.current?.releasePointerCapture(e.pointerId)
     }
     d.active = false
   }
@@ -217,69 +326,174 @@ function TreeCanvas({
     }
   }
 
-  return (
-    <div className="space-y-3">
-      <ZoomControls zoom={zoom} onOut={zoomOut} onIn={zoomIn} onReset={fit} />
+  const zoomByButton = (factor: number) => {
+    const vp = viewportRef.current
+    if (!vp) return
+    userMoved.current = true
+    zoomAt(vp.clientWidth / 2, vp.clientHeight / 2, view.current.scale * factor)
+  }
 
-      {/* A frameless, drag-to-pan canvas. The wide top-down chart can exceed the
-          pane, so it scrolls locally (the page never 2D-scrolls); the pane hugs a
-          short chart and caps at the viewport height when zoomed in. The inner
-          wrapper is sized to the SCALED dimensions so transform: scale leaves no
-          phantom scroll area; cards carry their own surface, so no frame is needed. */}
-      <div
-        ref={containerRef}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        onClickCapture={onClickCapture}
-        style={{ maxHeight: maxH }}
-        className={cn(
-          'touch-pan-x touch-pan-y select-none overflow-auto',
-          panning ? 'cursor-grabbing' : 'cursor-grab',
+  return (
+    <div
+      ref={viewportRef}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onClickCapture={onClickCapture}
+      style={{
+        touchAction: 'none',
+        // A faint dot grid signals the editable canvas (FigJam-style).
+        ...(editing
+          ? {
+              backgroundImage: 'radial-gradient(var(--color-border) 1px, transparent 1px)',
+              backgroundSize: '22px 22px',
+            }
+          : {}),
+      }}
+      className={cn(
+        'relative select-none overflow-hidden rounded-card border bg-surface',
+        editing ? 'border-primary/40' : 'border-border',
+        panning ? 'cursor-grabbing' : 'cursor-grab',
+      )}
+    >
+      {/* Board content: anchored at the viewport's top-left and moved + scaled by a
+          transform written imperatively, so pan/zoom never reconciles the tree. */}
+      <div ref={contentRef} className="absolute left-0 top-0 w-max origin-top-left will-change-transform">
+        {editing ? (
+          <PositionedTree
+            org={org}
+            query={query}
+            domain={domain}
+            filtering={filtering}
+            onSelect={onSelect}
+            positions={layout.positions}
+            managers={layout.managers}
+            getScale={getScale}
+            onCommitNode={commitNode}
+            onReparent={reparent}
+          />
+        ) : (
+          <TreeContent org={org} query={query} domain={domain} filtering={filtering} onSelect={onSelect} />
         )}
-      >
-        <div
-          className="mx-auto overflow-hidden"
-          style={natural.w ? { width: natural.w * zoom, height: natural.h * zoom } : undefined}
-        >
-          <div
-            ref={canvasRef}
-            className="w-max origin-top-left"
-            style={{ transform: `scale(${zoom})` }}
-          >
-            <TreeNode
-              person={org.root}
-              org={org}
-              query={query}
-              domain={domain}
-              filtering={filtering}
-              onSelect={onSelect}
-              isRoot
-            />
-          </div>
-        </div>
       </div>
+
+      <CanvasControls
+        zoomPct={zoomPct}
+        onOut={() => zoomByButton(1 / ZOOM_BTN_STEP)}
+        onIn={() => zoomByButton(ZOOM_BTN_STEP)}
+        onReset={fit}
+      />
+
+      <EditToolbar
+        editing={editing}
+        canReset={hasCustomLayout}
+        onToggle={() => setEditing((v) => !v)}
+        onReset={resetLayout}
+      />
+      <p className="pointer-events-none absolute right-3 top-12 text-2xs text-ink-muted">
+        {editing
+          ? 'Drag any card to rearrange — its reporting lines follow'
+          : 'Drag or scroll to move · pinch / ⌘-scroll to zoom'}
+      </p>
     </div>
   )
 }
 
-function ZoomControls({
-  zoom,
+// Top-right edit control: a single toggle, plus a reset once the user has moved
+// anything. Stops pointer events from bubbling so clicking it never pans.
+function EditToolbar({
+  editing,
+  canReset,
+  onToggle,
+  onReset,
+}: {
+  editing: boolean
+  canReset: boolean
+  onToggle: () => void
+  onReset: () => void
+}) {
+  return (
+    <div onPointerDown={(e) => e.stopPropagation()} className="absolute right-3 top-3 flex items-center gap-1.5">
+      {editing && canReset && (
+        <button
+          type="button"
+          onClick={onReset}
+          className="inline-flex h-8 items-center rounded-chip border border-border bg-surface px-2.5 text-xs font-medium text-ink-secondary shadow-sm transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          Reset layout
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-pressed={editing}
+        className={cn(
+          'inline-flex h-8 items-center gap-1.5 rounded-chip px-3 text-xs font-semibold shadow-sm transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary',
+          editing
+            ? 'bg-primary text-primary-fg hover:bg-primary-hover'
+            : 'border border-border bg-surface text-ink-secondary hover:border-border-strong hover:text-ink',
+        )}
+      >
+        {editing ? (
+          <>
+            <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path d="M3.5 8.5l3 3 6-7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Done
+          </>
+        ) : (
+          <>
+            <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.6}>
+              <path d="M11 2.5l2.5 2.5L6 12.5l-3 .5.5-3L11 2.5z" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Edit layout
+          </>
+        )}
+      </button>
+    </div>
+  )
+}
+
+// The drawn tree, isolated in a memo so panning/zooming (which only touch the
+// imperative transform + local zoom state) never reconcile this large subtree.
+const TreeContent = memo(function TreeContent({
+  org,
+  query,
+  domain,
+  filtering,
+  onSelect,
+}: {
+  org: Org
+  query: string
+  domain: DomainFilter
+  filtering: boolean
+  onSelect: (p: Person) => void
+}) {
+  return (
+    <TreeNode person={org.root} org={org} query={query} domain={domain} filtering={filtering} onSelect={onSelect} isRoot />
+  )
+})
+
+function CanvasControls({
+  zoomPct,
   onOut,
   onIn,
   onReset,
 }: {
-  zoom: number
+  zoomPct: number
   onOut: () => void
   onIn: () => void
   onReset: () => void
 }) {
   const btn =
-    'inline-flex size-8 items-center justify-center rounded-chip border border-border bg-surface text-ink-secondary transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40'
+    'inline-flex size-8 items-center justify-center rounded-chip border border-border bg-surface text-ink-secondary shadow-sm transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40'
   return (
-    <div className="flex items-center gap-1.5">
-      <button type="button" onClick={onOut} disabled={zoom <= ZOOM_MIN} aria-label="Zoom out" className={btn}>
+    <div
+      onPointerDown={(e) => e.stopPropagation()}
+      className="absolute bottom-3 left-3 flex items-center gap-1.5"
+    >
+      <button type="button" onClick={onOut} disabled={zoomPct <= SCALE_MIN * 100} aria-label="Zoom out" className={btn}>
         <svg aria-hidden viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth={1.6}>
           <path d="M4 8h8" strokeLinecap="round" />
         </svg>
@@ -287,16 +501,388 @@ function ZoomControls({
       <button
         type="button"
         onClick={onReset}
-        aria-label="Reset zoom to fit"
-        className="inline-flex h-8 min-w-12 items-center justify-center rounded-chip border border-border bg-surface px-2 text-xs font-medium text-ink-secondary tabular transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        aria-label="Zoom to fit"
+        className="inline-flex h-8 min-w-12 items-center justify-center rounded-chip border border-border bg-surface px-2 text-xs font-medium text-ink-secondary tabular shadow-sm transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       >
-        {Math.round(zoom * 100)}%
+        {zoomPct}%
       </button>
-      <button type="button" onClick={onIn} disabled={zoom >= ZOOM_MAX} aria-label="Zoom in" className={btn}>
+      <button type="button" onClick={onIn} disabled={zoomPct >= SCALE_MAX * 100} aria-label="Zoom in" className={btn}>
         <svg aria-hidden viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth={1.6}>
           <path d="M8 4v8M4 8h8" strokeLinecap="round" />
         </svg>
       </button>
+    </div>
+  )
+}
+
+// ── Edit mode: positioned, draggable graph with live-routing reporting lines ──
+function PositionedTree({
+  org,
+  query,
+  domain,
+  filtering,
+  onSelect,
+  positions,
+  managers,
+  getScale,
+  onCommitNode,
+  onReparent,
+}: {
+  org: Org
+  query: string
+  domain: DomainFilter
+  filtering: boolean
+  onSelect: (p: Person) => void
+  positions: PosMap
+  managers: MgrMap
+  getScale: () => number
+  onCommitNode: (name: string, x: number, y: number) => void
+  onReparent: (name: string, newManager: string, originalManager: string | null) => void
+}) {
+  // Apply the manager overrides to the sheet hierarchy, yielding the effective
+  // child lists the layout runs over, plus a child→manager lookup.
+  const { getChildren, managerOf } = useMemo(() => {
+    const children = new Map<string, Child[]>()
+    const mgrOf = new Map<string, string | null>()
+    for (const p of [...org.people, ...org.openRoles]) {
+      const overridden = Object.prototype.hasOwnProperty.call(managers, p.name)
+      const mgr = overridden ? managers[p.name] : p.managerName
+      mgrOf.set(p.name, mgr)
+      if (!mgr) continue
+      const mentee = overridden ? false : p.isMentored // a manual line is a hard report
+      const arr = children.get(mgr)
+      if (arr) arr.push({ person: p, mentee })
+      else children.set(mgr, [{ person: p, mentee }])
+    }
+    for (const arr of children.values()) arr.sort((a, b) => Number(a.mentee) - Number(b.mentee))
+    return {
+      getChildren: (name: string): Child[] => children.get(name) ?? [],
+      managerOf: (name: string): string | null => mgrOf.get(name) ?? null,
+    }
+  }, [org, managers])
+
+  const layout = useMemo(() => computeLayout(org.root, getChildren), [org.root, getChildren])
+  const nodeById = useMemo(() => new Map(layout.nodes.map((n) => [n.id, n])), [layout])
+
+  // Candidate managers for the "Reports to" control: the root plus anyone with
+  // reports, sorted. Per-card we drop the person and their own descendants, so a
+  // change can never form a cycle.
+  const { managerNames, isDescendantOf } = useMemo(() => {
+    const names = new Set<string>([org.root.name])
+    for (const n of layout.nodes) {
+      const m = managerOf(n.person.name)
+      if (m) names.add(m)
+    }
+    const ancestorCache = new Map<string, Set<string>>()
+    const ancestorsOf = (name: string): Set<string> => {
+      const cached = ancestorCache.get(name)
+      if (cached) return cached
+      const set = new Set<string>()
+      let cur = managerOf(name)
+      let guard = 0
+      while (cur && !set.has(cur) && guard++ < 500) {
+        set.add(cur)
+        cur = managerOf(cur)
+      }
+      ancestorCache.set(name, set)
+      return set
+    }
+    return {
+      managerNames: [...names].sort((a, b) => a.localeCompare(b)),
+      // candidate is below person ⇢ person is one of candidate's ancestors
+      isDescendantOf: (candidate: string, person: string) => ancestorsOf(candidate).has(person),
+    }
+  }, [layout, managerOf, org.root.name])
+
+  const computed = useMemo(
+    () => new Map(layout.nodes.map((n) => [n.id, { x: n.x, y: n.y }])),
+    [layout],
+  )
+  // A node's committed position: the user's dragged spot (by name) if any, else
+  // the tidy seed (by unique node id).
+  const posById = useCallback(
+    (id: string) => {
+      const node = nodeById.get(id)
+      const dragged = node ? positions[node.person.name] : undefined
+      return dragged ?? computed.get(id) ?? { x: 0, y: 0 }
+    },
+    [nodeById, positions, computed],
+  )
+
+  // Edges touching each node id — the only ones that need redrawing as it drags.
+  const edgesByNode = useMemo(() => {
+    const m = new Map<string, Edge[]>()
+    const push = (k: string, e: Edge) => {
+      const arr = m.get(k)
+      if (arr) arr.push(e)
+      else m.set(k, [e])
+    }
+    for (const e of layout.edges) {
+      push(e.fromId, e)
+      push(e.toId, e)
+    }
+    return m
+  }, [layout])
+
+  const pathRefs = useRef(new Map<string, SVGPathElement>())
+  // The dragging node's live position, so edge math sees it without a React
+  // render (cleared on commit, where state takes over).
+  const dragLive = useRef<{ id: string; x: number; y: number } | null>(null)
+  const livePos = useCallback(
+    (id: string) => {
+      const d = dragLive.current
+      return d && d.id === id ? { x: d.x, y: d.y } : posById(id)
+    },
+    [posById],
+  )
+
+  const onMove = useCallback(
+    (id: string, x: number, y: number) => {
+      dragLive.current = { id, x, y }
+      const es = edgesByNode.get(id)
+      if (!es) return
+      for (const e of es) {
+        const el = pathRefs.current.get(edgeKey(e))
+        if (el) el.setAttribute('d', edgePath(livePos(e.fromId), livePos(e.toId)))
+      }
+    },
+    [edgesByNode, livePos],
+  )
+  const onCommit = useCallback(
+    (name: string, x: number, y: number) => {
+      dragLive.current = null
+      onCommitNode(name, x, y)
+    },
+    [onCommitNode],
+  )
+
+  // Board large enough for every node, including any dragged past the seed bounds.
+  const width = useMemo(() => {
+    let w = layout.width
+    for (const n of layout.nodes) w = Math.max(w, posById(n.id).x + NODE_W)
+    return w
+  }, [layout, posById])
+  const height = useMemo(() => {
+    let h = layout.height
+    for (const n of layout.nodes) h = Math.max(h, posById(n.id).y + NODE_H)
+    return h
+  }, [layout, posById])
+
+  return (
+    <div className="relative" style={{ width, height }}>
+      <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={width} height={height} aria-hidden>
+        {layout.edges.map((e) => (
+          <path
+            key={edgeKey(e)}
+            ref={(el) => {
+              if (el) pathRefs.current.set(edgeKey(e), el)
+              else pathRefs.current.delete(edgeKey(e))
+            }}
+            d={edgePath(posById(e.fromId), posById(e.toId))}
+            fill="none"
+            stroke="var(--color-border-strong)"
+            strokeWidth={1.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray={e.mentee ? '5 4' : undefined}
+          />
+        ))}
+      </svg>
+
+      {layout.nodes.map((n) => {
+        const p = posById(n.id)
+        const original = n.person.managerName
+        const current = managerOf(n.person.name)
+        return (
+          <DraggableNode
+            key={n.id}
+            node={n}
+            x={p.x}
+            y={p.y}
+            dim={dimmed(n.person, query, domain, filtering)}
+            getScale={getScale}
+            onSelect={onSelect}
+            onMove={onMove}
+            onCommit={onCommit}
+            currentManager={current}
+            originalManager={original}
+            managerOptions={managerNames.filter(
+              (m) => m !== n.person.name && !isDescendantOf(m, n.person.name),
+            )}
+            onReparent={onReparent}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+// A single card the user can grab and drag. It moves itself imperatively (no
+// per-frame React render); the parent redraws the lines it touches. A press
+// that doesn't travel far stays a click and opens the person's detail. In edit
+// mode the footer carries a "Reports to" control for re-parenting.
+function DraggableNode({
+  node,
+  x,
+  y,
+  dim,
+  getScale,
+  onSelect,
+  onMove,
+  onCommit,
+  currentManager,
+  originalManager,
+  managerOptions,
+  onReparent,
+}: {
+  node: LaidOutNode
+  x: number
+  y: number
+  dim: boolean
+  getScale: () => number
+  onSelect: (p: Person) => void
+  onMove: (id: string, x: number, y: number) => void
+  onCommit: (name: string, x: number, y: number) => void
+  currentManager: string | null
+  originalManager: string | null
+  managerOptions: string[]
+  onReparent: (name: string, newManager: string, originalManager: string | null) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const drag = useRef<{
+    cx: number
+    cy: number
+    ox: number
+    oy: number
+    nx: number
+    ny: number
+    moved: boolean
+  } | null>(null)
+  const suppressClick = useRef(false)
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.stopPropagation() // keep the canvas from starting a pan
+    drag.current = { cx: e.clientX, cy: e.clientY, ox: x, oy: y, nx: x, ny: y, moved: false }
+    // NB: pointer capture is deferred until the press actually becomes a drag
+    // (below). Capturing here would swallow the trailing click, so a tap could
+    // never open the detail dialog or fire on keyboard activation.
+  }
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current
+    if (!d) return
+    const s = getScale() || 1
+    const nx = d.ox + (e.clientX - d.cx) / s
+    const ny = d.oy + (e.clientY - d.cy) / s
+    if (!d.moved && Math.hypot(nx - d.ox, ny - d.oy) < DRAG_THRESHOLD_PX / s) return // still a click
+    if (!d.moved && ref.current) {
+      d.moved = true
+      ref.current.style.zIndex = '20' // lift above siblings while moving
+      ref.current.setPointerCapture(e.pointerId) // now follow the pointer anywhere
+    }
+    d.nx = nx
+    d.ny = ny
+    if (ref.current) ref.current.style.transform = `translate(${nx}px, ${ny}px)`
+    onMove(node.id, nx, ny)
+  }
+  const endDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current
+    if (!d) return
+    if (d.moved) {
+      ref.current?.releasePointerCapture(e.pointerId)
+      if (ref.current) ref.current.style.zIndex = ''
+      suppressClick.current = e.type !== 'pointercancel' // a real drag — eat the trailing click
+      onCommit(node.person.name, d.nx, d.ny)
+    }
+    drag.current = null
+  }
+  const onClickCapture = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (suppressClick.current) {
+      e.preventDefault()
+      e.stopPropagation()
+      suppressClick.current = false
+    }
+  }
+
+  // Root reports to no one; everyone else can be re-parented.
+  const canReparent = node.depth > 0 && currentManager != null
+  const reparented = currentManager !== originalManager
+
+  return (
+    <div
+      ref={ref}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onClickCapture={onClickCapture}
+      className="absolute left-0 top-0 flex cursor-grab touch-none flex-col active:cursor-grabbing"
+      style={{ transform: `translate(${x}px, ${y}px)`, width: NODE_W, minHeight: NODE_H }}
+    >
+      <div className={cn('flex flex-1 flex-col transition-opacity duration-150', dim && 'opacity-40')}>
+        <PersonCard
+          person={node.person}
+          onSelect={onSelect}
+          showDomain
+          className={cn(
+            'flex-1 cursor-grab active:cursor-grabbing',
+            node.depth === 0 && 'border-primary/40 shadow-sm',
+            reparented && 'border-primary/50',
+          )}
+        />
+      </div>
+      {canReparent && (
+        <ReportsToSelect
+          value={currentManager}
+          options={managerOptions}
+          changed={reparented}
+          onChange={(mgr) => onReparent(node.person.name, mgr, originalManager)}
+        />
+      )}
+    </div>
+  )
+}
+
+// The inline "Reports to" picker shown on each card in edit mode. Its own
+// pointerdown is stopped so opening the menu never starts a card drag or a pan.
+function ReportsToSelect({
+  value,
+  options,
+  changed,
+  onChange,
+}: {
+  value: string
+  options: string[]
+  changed: boolean
+  onChange: (manager: string) => void
+}) {
+  return (
+    <div
+      onPointerDown={(e) => e.stopPropagation()}
+      className={cn(
+        'mt-1 flex items-center gap-1.5 rounded-chip border bg-surface px-2 py-1',
+        changed ? 'border-primary/50' : 'border-border',
+      )}
+    >
+      <span className="shrink-0 text-2xs text-ink-muted">Reports to</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label="Reports to"
+        className={cn(
+          'min-w-0 flex-1 cursor-pointer truncate bg-transparent text-2xs font-semibold outline-none',
+          changed ? 'text-primary-text' : 'text-ink-secondary',
+        )}
+      >
+        {options.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
+      <svg aria-hidden viewBox="0 0 16 16" className="size-3 shrink-0 text-ink-muted" fill="none" stroke="currentColor" strokeWidth={1.6}>
+        <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
     </div>
   )
 }
