@@ -2,12 +2,13 @@ import type {
   RawRow,
   Person,
   Org,
+  OrgEdits,
   Reports,
   DomainGroup,
   WorkstreamGroup,
   TransferGhost,
 } from './types'
-import { normalizePerson } from './parse'
+import { normalizePerson, workstreamChips } from './parse'
 import { ROOT, MANUAL_PEOPLE, DOMAIN_WS_ORDER, XFER_INCOMING_GHOSTS } from './constants'
 
 /** Build the fully-derived Org from raw sheet rows. Pure + deterministic. */
@@ -26,9 +27,15 @@ export function buildOrg(rawRows: RawRow[]): Org {
 
   const openRoles = normalized.filter((p) => p.isOpenRole)
   const people = normalized.filter((p) => !p.isOpenRole)
-
   const root = normalizePerson(ROOT as RawRow)
 
+  return deriveOrg(people, openRoles, root)
+}
+
+/** Re-apply the relationship/grouping derivation over an explicit set of people.
+ *  Shared by buildOrg (from the sheet) and applyEdits (with overrides baked in),
+ *  so a single code path owns childMap / leadership / domain grouping / ghosts. */
+function deriveOrg(people: Person[], openRoles: Person[], root: Person): Org {
   // Reporting tree: name → { reports, mentees }. Open roles included so the
   // tree can show TBH placeholders beneath their managers.
   const childMap = new Map<string, Reports>()
@@ -76,6 +83,58 @@ export function buildOrg(rawRows: RawRow[]): Org {
     ghosts,
     syncedAt: null,
   }
+}
+
+/** Return a new Org with the user's overrides (manager / domain / workstream)
+ *  baked in, then fully re-derived — so every view reflects the edits. A person
+ *  with no override passes through untouched (same object identity). */
+export function applyEdits(org: Org, edits: OrgEdits): Org {
+  const apply = (p: Person): Person => {
+    const mgr = edits.managers[p.name]
+    const dom = edits.domains[p.name]
+    const ws = edits.workstreams[p.name]
+    if (mgr === undefined && dom === undefined && ws === undefined) return p
+    const next: Person = { ...p }
+    if (mgr !== undefined) {
+      // A manual line is a hard report (never a mentorship).
+      next.managerName = mgr || null
+      next.reportsToRaw = mgr
+      next.isMentored = false
+    }
+    if (dom !== undefined) next.domain = dom
+    if (ws !== undefined) {
+      next.workstreams = ws
+      next.workstreamsRaw = ws
+      next.workstreamChips = workstreamChips(ws)
+    }
+    return next
+  }
+  const derived = deriveOrg(org.people.map(apply), org.openRoles.map(apply), org.root)
+  derived.syncedAt = org.syncedAt
+  return derived
+}
+
+/** Valid "Reports to" targets for a person: the root plus anyone who manages
+ *  someone, minus the person and their own descendants (so a re-parent can never
+ *  form a cycle). Used by both the detail dialog and the edit-canvas picker. */
+export function managerCandidates(org: Org, personName: string): string[] {
+  const all = [...org.people, ...org.openRoles]
+  const mgrOf = new Map<string, string | null>(all.map((p) => [p.name, p.managerName]))
+  const names = new Set<string>([org.root.name])
+  for (const p of all) if (p.managerName) names.add(p.managerName)
+  // candidate sits below person ⇢ person appears in candidate's manager chain.
+  const isDescendantOfPerson = (candidate: string): boolean => {
+    let cur = mgrOf.get(candidate) ?? null
+    let guard = 0
+    while (cur && guard++ < 500) {
+      if (cur === personName) return true
+      cur = mgrOf.get(cur) ?? null
+    }
+    return false
+  }
+  return [...names]
+    .filter((n) => n !== personName && !isDescendantOfPerson(n))
+    .sort((a, b) => a.localeCompare(b))
 }
 
 /** Group everyone by domain → workstream (flattened across managers). Each
@@ -142,9 +201,17 @@ export function peersOf(org: Org, p: Person): Person[] {
 export function descendantCount(org: Org, name: string): number {
   return descendantCountIn(org.childMap, name)
 }
-function descendantCountIn(childMap: Map<string, Reports>, name: string): number {
+function descendantCountIn(
+  childMap: Map<string, Reports>,
+  name: string,
+  // Guard against a cyclic override (e.g. a stale persisted re-parent) hanging
+  // the recursion — each name is counted at most once.
+  seen: Set<string> = new Set(),
+): number {
+  if (seen.has(name)) return 0
+  seen.add(name)
   const direct = childMap.get(name)?.reports ?? []
   let total = direct.length
-  for (const r of direct) total += descendantCountIn(childMap, r.name)
+  for (const r of direct) total += descendantCountIn(childMap, r.name, seen)
   return total
 }

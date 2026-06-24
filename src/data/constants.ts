@@ -110,6 +110,13 @@ export const DOMAIN_WS_ORDER: {
   },
 ]
 
+// Domain → its workstream keys, for the editable "Product" picker in the detail
+// dialog. Derived from DOMAIN_WS_ORDER so it stays in lockstep with the grouping.
+// Keys lowercase to the WS_MAP entries, so a chosen product gets the right chip.
+export const WORKSTREAMS_BY_DOMAIN = Object.fromEntries(
+  DOMAIN_WS_ORDER.map((d) => [d.domain, d.workstreams.map((w) => w.key)]),
+) as Record<Domain, string[]>
+
 export const DOMAIN_ORDER: Domain[] = ['Teachers', 'Students', 'Parents', 'Platforms', 'HQ']
 
 export const DOMAIN_LABEL: Record<Domain, string> = {

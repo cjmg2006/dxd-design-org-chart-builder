@@ -98,6 +98,19 @@ export interface TransferGhost {
   destWorkstream: string
 }
 
+/** User overrides applied on top of the sheet-derived org, persisted per browser.
+ *  Only customised people are stored; everyone else falls back to the sheet. */
+export interface OrgEdits {
+  /** Cards the user has dragged on the edit canvas ({x,y}), keyed by name. */
+  positions: Record<string, { x: number; y: number }>
+  /** Re-parented people: name → new "Reports to" target. */
+  managers: Record<string, string>
+  /** Re-domained people: name → new domain. */
+  domains: Record<string, Domain>
+  /** Re-product people: name → new workstream string ('' clears the product). */
+  workstreams: Record<string, string>
+}
+
 /** The fully-derived org, consumed by every view. */
 export interface Org {
   /** Active people (incl. manual additions, excl. open-role placeholders). */

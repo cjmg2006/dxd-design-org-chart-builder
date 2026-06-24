@@ -267,3 +267,42 @@ evaluator pass caught dialog/close, back, chip, and disclosure-trigger targets t
 and the initial build both missed. A `checks/` hit-area script (rendered-DOM height measurement at
 mobile widths) would have caught all of these mechanically; worth building when the deterministic
 suite is extended.
+
+## Editable detail dialog — Reports to / Domain / Product (user-directed, 2026-06-24)
+
+Wondo asked that the person detail dialog let him **assign a manager and a product for any
+person**, not just drag-rearrange in Edit mode. He chose (clickable preview) to split "product"
+into **two dropdowns — Domain then Product (workstream)** — alongside **Reports to**, for everyone.
+
+**What changed.** The reparent override that previously lived inside the Tree Edit-mode canvas was
+lifted into an app-wide, localStorage-backed store (`src/data/orgEdits.tsx`, `useOrgEdits` + a
+context) holding four override maps: `positions`, `managers`, `domains`, `workstreams` (same
+`dxd-orgchart-layout-v3` key — old layouts migrate, the two new maps default to `{}`). `applyEdits()`
+(in `org.ts`) bakes the manager/domain/workstream overrides onto the people and **re-derives one
+"effective org"** (childMap, leadership, domain→workstream grouping, peers) through the shared
+`deriveOrg()` path, so a change made anywhere shows **everywhere** — the static tree, the Edit
+canvas, Teams, and Directory — not just in a what-if Edit view. App computes the effective org once
+and feeds it to every view + the dialog; the base (sheet) org is kept only to read "original" values.
+
+**Decisions / nuances.**
+- *Selecting the original value clears the override* (manager / domain / product), so "Reset edits"
+  (the relabelled Edit-canvas reset, now clearing all four maps) and per-field revert both work; an
+  edited field is highlighted in primary.
+- *Domain and Product are independent* (the user picked the two-dropdown option), so they can diverge
+  from the sheet's "domain inferred from workstream" rule — intended. Product options are scoped to
+  the chosen domain (`WORKSTREAMS_BY_DOMAIN`, derived from `DOMAIN_WS_ORDER`); a "No product" option
+  clears it; an unlisted multi-workstream sheet value stays pickable.
+- *Cycle safety:* the manager picker shares one `managerCandidates()` helper (drops self + the
+  person's own descendants) with the Edit canvas, and `descendantCountIn` gained a visited-set guard
+  so a stale cyclic override can never hang the recursion.
+- *Live dialog:* the dialog renders from the freshly-derived record (looked up by name), so an edit
+  reflects in the open dialog (e.g. peers recompute) without reopening. Re-parenting now also reflects
+  in the **static** tree, a deliberate shift from the old Edit-mode-only what-if scope — edits are now
+  real and persistent.
+
+**Trade-off accepted (first cut):** the Reports-to row is now a picker rather than a click-through to
+the manager's card (peers/reports/mentees still navigate); the Explorer focus-pane detail reflects
+edits but stays read-only (the dialog is the edit surface). Verified in-browser at :8731: all three
+pickers show correct current values; editing Product→Markly re-files Elky under the Markly group in
+Teams and survives reload; re-parenting Elky→Gloria recomputes peers 12→10 and persists; Edit canvas
+(drag + 32 inline pickers) intact; no console errors; `tsc -b` + `npm run build` clean.
