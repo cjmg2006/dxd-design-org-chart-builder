@@ -10,9 +10,16 @@ interface SearchBoxProps {
 export function SearchBox({ value, onChange, resultCount, total }: SearchBoxProps) {
   return (
     <div className="w-full max-w-sm">
-      <label htmlFor="people-search" className="block text-2xs font-semibold uppercase tracking-wide text-ink-muted">
-        Find people
-      </label>
+      {/* Label + live result count share one row, so the box is just label +
+          input — its bottom aligns cleanly with the View toggle beside it. */}
+      <div className="flex items-baseline justify-between gap-2">
+        <label htmlFor="people-search" className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">
+          Find people
+        </label>
+        <span aria-live="polite" className="truncate text-2xs text-ink-muted tabular">
+          {value.trim() ? `${resultCount} of ${total} ${resultCount === 1 ? 'person' : 'people'}` : ''}
+        </span>
+      </div>
       <div className="relative mt-1">
         <svg
           aria-hidden
@@ -35,9 +42,6 @@ export function SearchBox({ value, onChange, resultCount, total }: SearchBoxProp
           className="h-10 w-full rounded-pill border border-border bg-surface pl-9 pr-3 text-sm text-ink placeholder:text-ink-muted focus-visible:border-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         />
       </div>
-      <p aria-live="polite" className="mt-1 h-4 text-2xs text-ink-muted">
-        {value.trim() ? `${resultCount} of ${total} ${resultCount === 1 ? 'person' : 'people'}` : ''}
-      </p>
     </div>
   )
 }
