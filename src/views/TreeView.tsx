@@ -35,13 +35,14 @@ type PosMap = Record<string, { x: number; y: number }>
 
 const SCALE_MIN = 0.1 // zoomed all the way out
 const SCALE_MAX = 2 // zoomed all the way in
+const DEFAULT_SCALE = 0.8 // opening zoom: read cards at a glance, root anchored at top
 const ZOOM_BTN_STEP = 1.5 // +/- button zoom factor (snappier steps)
 const ZOOM_WHEEL_RATE = 0.003 // pinch / ⌘-scroll zoom sensitivity per wheel delta
 const FIT_PAD = 56 // breathing room around the chart when zooming to fit
 const MIN_BOARD_HEIGHT = 360 // floor for the canvas board height on short viewports
 const DRAG_THRESHOLD_PX = 4 // pointer travel before a press becomes a pan rather than a click
 
-export function TreeView({ org, query, domain, onSelect }: ViewProps) {
+export function TreeView({ org, query, domain, onSelect, onAddPerson, onOpenHistory }: ViewProps) {
   // Render the lightweight outline on narrow screens — never the wide canvas
   // (it would force two-dimensional page scrolling). Default to the outline
   // before the media query resolves so the first mount is the safe layout.
@@ -53,7 +54,15 @@ export function TreeView({ org, query, domain, onSelect }: ViewProps) {
     <div className="space-y-4">
       <Header org={org} />
       {isWide ? (
-        <TreeCanvas org={org} query={query} domain={domain} filtering={filtering} onSelect={onSelect} />
+        <TreeCanvas
+          org={org}
+          query={query}
+          domain={domain}
+          filtering={filtering}
+          onSelect={onSelect}
+          onAddPerson={onAddPerson}
+          onOpenHistory={onOpenHistory}
+        />
       ) : (
         <Outline org={org} query={query} domain={domain} filtering={filtering} onSelect={onSelect} />
       )}
@@ -86,12 +95,16 @@ function TreeCanvas({
   domain,
   filtering,
   onSelect,
+  onAddPerson,
+  onOpenHistory,
 }: {
   org: Org
   query: string
   domain: DomainFilter
   filtering: boolean
   onSelect: (p: Person) => void
+  onAddPerson?: (managerName?: string) => void
+  onOpenHistory?: () => void
 }) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -155,7 +168,7 @@ function TreeCanvas({
     vp.style.height = `${Math.max(MIN_BOARD_HEIGHT, window.innerHeight - vp.getBoundingClientRect().top - 16)}px`
   }, [])
 
-  // Zoom-to-fit the whole chart, centred — the opening view and the reset action.
+  // Zoom-to-fit the whole chart, centred — the explicit "Zoom to fit" action.
   const fit = useCallback(() => {
     const vp = viewportRef.current
     const cv = contentRef.current
@@ -172,36 +185,50 @@ function TreeCanvas({
     setZoomPct(Math.round(s * 100))
   }, [])
 
-  // Size the board, then fit the chart into it — before paint, so nothing unfitted flashes.
+  // The opening view: a fixed 80% zoom, root centred near the top — so people
+  // start reading actual cards rather than a fit-to-screen bird's-eye. "Zoom to
+  // fit" remains a click away for the whole-org overview.
+  const openAtDefault = useCallback(() => {
+    const vp = viewportRef.current
+    const cv = contentRef.current
+    if (!vp || !cv || !cv.offsetWidth) return
+    setView((vp.clientWidth - cv.offsetWidth * DEFAULT_SCALE) / 2, FIT_PAD, DEFAULT_SCALE)
+    setZoomPct(Math.round(DEFAULT_SCALE * 100))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setView reads live refs; stable
+  }, [])
+
+  // Size the board, then open at the default zoom — before paint, so nothing
+  // unpositioned flashes.
   useLayoutEffect(() => {
     sizeBoard()
-    fit()
-  }, [sizeBoard, fit])
+    openAtDefault()
+  }, [sizeBoard, openAtDefault])
 
   // Entering/leaving edit mode deliberately keeps the current zoom & pan — the
   // user stays focused where they were rather than snapping back to fit-all.
 
   // Keep the board sized on resize and on layout shifts above it (e.g. the Legend
-  // disclosure). Re-fit only while the user hasn't moved the canvas, so a late
-  // content reflow (fonts/data) lands centred without overriding their view.
+  // disclosure). Re-apply the default view only while the user hasn't moved the
+  // canvas, so a late content reflow (fonts/data) lands placed without overriding
+  // their view.
   useEffect(() => {
     const cv = contentRef.current
     let raf = 0
     const roContent = new ResizeObserver(() => {
       if (userMoved.current) return
       cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(fit)
+      raf = requestAnimationFrame(openAtDefault)
     })
     if (cv) roContent.observe(cv)
     const roBody = new ResizeObserver(() => {
       sizeBoard()
-      if (!userMoved.current) fit()
+      if (!userMoved.current) openAtDefault()
     })
     roBody.observe(document.body)
     const onResize = () => {
       sizeBoard()
       if (userMoved.current) setView(view.current.x, view.current.y, view.current.scale)
-      else fit()
+      else openAtDefault()
     }
     window.addEventListener('resize', onResize)
     return () => {
@@ -210,7 +237,7 @@ function TreeCanvas({
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', onResize)
     }
-  }, [sizeBoard, fit])
+  }, [sizeBoard, openAtDefault])
 
   // Wheel: two-finger swipe / wheel pans; pinch or ⌘/Ctrl-scroll zooms to the cursor.
   // Native non-passive listener so preventDefault stops the page itself from scrolling.
@@ -318,6 +345,7 @@ function TreeCanvas({
             domain={domain}
             filtering={filtering}
             onSelect={onSelect}
+            onAddPerson={onAddPerson}
             positions={edits.positions}
             getScale={getScale}
             onCommitNode={commitNode}
@@ -340,31 +368,63 @@ function TreeCanvas({
         canReset={hasEdits}
         onToggle={() => setEditing((v) => !v)}
         onReset={reset}
+        onAdd={onAddPerson ? () => onAddPerson() : undefined}
+        onHistory={onOpenHistory}
       />
       <p className="pointer-events-none absolute right-3 top-12 text-2xs text-ink-muted">
         {editing
-          ? 'Drag any card to rearrange — its reporting lines follow'
+          ? 'Drag to rearrange · hover a card for + to add a report'
           : 'Drag or scroll to move · pinch / ⌘-scroll to zoom'}
       </p>
     </div>
   )
 }
 
-// Top-right edit control: a single toggle, plus a reset once the user has moved
-// anything. Stops pointer events from bubbling so clicking it never pans.
+// Top-right edit control: the edit toggle, plus (while editing) an "Add person"
+// button and a reset once anything has changed. Stops pointer events from
+// bubbling so clicking it never pans.
 function EditToolbar({
   editing,
   canReset,
   onToggle,
   onReset,
+  onAdd,
+  onHistory,
 }: {
   editing: boolean
   canReset: boolean
   onToggle: () => void
   onReset: () => void
+  onAdd?: () => void
+  onHistory?: () => void
 }) {
   return (
     <div onPointerDown={(e) => e.stopPropagation()} className="absolute right-3 top-3 flex items-center gap-1.5">
+      {editing && onHistory && (
+        <button
+          type="button"
+          onClick={onHistory}
+          className="inline-flex h-8 items-center gap-1.5 rounded-chip border border-border bg-surface px-2.5 text-xs font-medium text-ink-secondary shadow-sm transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.6}>
+            <circle cx="8" cy="8" r="6" />
+            <path d="M8 5v3l2 1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          History
+        </button>
+      )}
+      {editing && onAdd && (
+        <button
+          type="button"
+          onClick={onAdd}
+          className="inline-flex h-8 items-center gap-1.5 rounded-chip border border-border bg-surface px-2.5 text-xs font-medium text-ink-secondary shadow-sm transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.8}>
+            <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+          </svg>
+          Add person
+        </button>
+      )}
       {editing && canReset && (
         <button
           type="button"
@@ -473,6 +533,7 @@ function PositionedTree({
   domain,
   filtering,
   onSelect,
+  onAddPerson,
   positions,
   getScale,
   onCommitNode,
@@ -484,6 +545,7 @@ function PositionedTree({
   domain: DomainFilter
   filtering: boolean
   onSelect: (p: Person) => void
+  onAddPerson?: (managerName?: string) => void
   positions: PosMap
   getScale: () => number
   onCommitNode: (name: string, x: number, y: number) => void
@@ -666,6 +728,7 @@ function PositionedTree({
               (m) => m !== n.person.name && !isDescendantOf(m, n.person.name),
             )}
             onReparent={onReparent}
+            onAddReport={onAddPerson ? () => onAddPerson(n.person.name) : undefined}
           />
         )
       })}
@@ -690,6 +753,7 @@ function DraggableNode({
   originalManager,
   managerOptions,
   onReparent,
+  onAddReport,
 }: {
   node: LaidOutNode
   x: number
@@ -703,6 +767,7 @@ function DraggableNode({
   originalManager: string | null
   managerOptions: string[]
   onReparent: (name: string, newManager: string, originalManager: string | null) => void
+  onAddReport?: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const drag = useRef<{
@@ -772,7 +837,7 @@ function DraggableNode({
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       onClickCapture={onClickCapture}
-      className="absolute left-0 top-0 flex cursor-grab touch-none flex-col active:cursor-grabbing"
+      className="group absolute left-0 top-0 flex cursor-grab touch-none flex-col active:cursor-grabbing"
       style={{ transform: `translate(${x}px, ${y}px)`, width: NODE_W, minHeight: NODE_H }}
     >
       <div className={cn('flex flex-1 flex-col transition-opacity duration-150', dim && 'opacity-40')}>
@@ -787,6 +852,24 @@ function DraggableNode({
           )}
         />
       </div>
+      {/* Hover/focus "+" — adds a direct report to this card. Stops its own
+          pointerdown so grabbing it never starts a drag. */}
+      {onAddReport && (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            onAddReport()
+          }}
+          aria-label={`Add a report to ${node.person.name}`}
+          className="absolute -right-2 -top-2 z-10 inline-flex size-6 items-center justify-center rounded-pill border border-border bg-surface text-ink-secondary opacity-0 shadow-sm transition-all duration-150 hover:border-primary hover:text-primary group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.8}>
+            <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+          </svg>
+        </button>
+      )}
       {canReparent && (
         <ReportsToSelect
           value={currentManager}

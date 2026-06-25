@@ -25,4 +25,8 @@ export interface ViewProps {
   query: string
   domain: DomainFilter
   onSelect: (p: Person) => void
+  /** Open the "add a person" form, optionally pre-filling the manager. */
+  onAddPerson?: (managerName?: string) => void
+  /** Open the shared "recent changes" history. */
+  onOpenHistory?: () => void
 }

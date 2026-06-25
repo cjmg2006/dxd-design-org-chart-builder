@@ -3,6 +3,7 @@ import type {
   Person,
   Org,
   OrgEdits,
+  AddedPerson,
   Reports,
   DomainGroup,
   WorkstreamGroup,
@@ -85,9 +86,26 @@ function deriveOrg(people: Person[], openRoles: Person[], root: Person): Org {
   }
 }
 
-/** Return a new Org with the user's overrides (manager / domain / workstream)
- *  baked in, then fully re-derived — so every view reflects the edits. A person
- *  with no override passes through untouched (same object identity). */
+/** Turn a user-added person into a full Person, then let the override maps layer
+ *  on top exactly as they do for sheet people. Domain is taken verbatim (it isn't
+ *  always inferable from the chosen product). */
+function personFromAddition(a: AddedPerson): Person {
+  const base = normalizePerson({
+    Name: a.name,
+    Team: '',
+    Domain: a.domain,
+    Workstreams: a.workstreams,
+    RO: a.managerName,
+    'GT/AR/Intern': a.employment,
+    Specialty: a.specialty,
+    Remarks: '',
+  } as RawRow)
+  return { ...base, domain: a.domain }
+}
+
+/** Return a new Org with the user's additions + overrides (manager / domain /
+ *  workstream) baked in, then fully re-derived — so every view reflects the edits.
+ *  A sheet person with no override passes through untouched (same object identity). */
 export function applyEdits(org: Org, edits: OrgEdits): Org {
   const apply = (p: Person): Person => {
     const mgr = edits.managers[p.name]
@@ -109,7 +127,24 @@ export function applyEdits(org: Org, edits: OrgEdits): Org {
     }
     return next
   }
-  const derived = deriveOrg(org.people.map(apply), org.openRoles.map(apply), org.root)
+  // Added people join the sheet people before overrides apply, so a card added
+  // here can still be re-parented / re-domained / dragged like anyone else.
+  const added = Object.values(edits.additions).map(personFromAddition)
+  // Removed people drop out entirely (the delete handler promotes their reports
+  // to their manager first, so the tree stays connected — see PersonDetail).
+  const removed = edits.removed ?? {}
+  const keep = (p: Person) => !removed[p.name]
+  const people = [...org.people, ...added].map(apply).filter(keep)
+  const openRoles = org.openRoles.map(apply).filter(keep)
+  // Guard against a manager override (or stale shared edit) pointing at someone
+  // who's since been removed: re-home the orphan onto the root rather than
+  // letting them vanish from the tree (their manager card no longer exists).
+  const names = new Set<string>([org.root.name, ...people.map((p) => p.name), ...openRoles.map((p) => p.name)])
+  const rehome = (p: Person): Person =>
+    p.managerName && !names.has(p.managerName)
+      ? { ...p, managerName: org.root.name, reportsToRaw: org.root.name, isMentored: false }
+      : p
+  const derived = deriveOrg(people.map(rehome), openRoles.map(rehome), org.root)
   derived.syncedAt = org.syncedAt
   return derived
 }

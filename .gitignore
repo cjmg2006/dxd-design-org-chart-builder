@@ -5,3 +5,6 @@ dist
 .vercel
 .vite
 *.tsbuildinfo
+.dev-store.json
+.env*.local
+.env*

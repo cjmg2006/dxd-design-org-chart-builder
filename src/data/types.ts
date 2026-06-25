@@ -98,6 +98,20 @@ export interface TransferGhost {
   destWorkstream: string
 }
 
+/** A person added by the user (not present in the sheet). Stored in full because
+ *  there's no sheet row to fall back to; manager / domain / product overrides
+ *  still layer on top via the override maps below, keyed by the same name. */
+export interface AddedPerson {
+  name: string
+  /** The person they report to (always set — added people hang off a manager). */
+  managerName: string
+  domain: Domain
+  /** Workstream / product string ('' = no product). */
+  workstreams: string
+  specialty: string
+  employment: EmploymentType
+}
+
 /** User overrides applied on top of the sheet-derived org, persisted per browser.
  *  Only customised people are stored; everyone else falls back to the sheet. */
 export interface OrgEdits {
@@ -109,6 +123,10 @@ export interface OrgEdits {
   domains: Record<string, Domain>
   /** Re-product people: name → new workstream string ('' clears the product). */
   workstreams: Record<string, string>
+  /** People the user added by hand, keyed by name. */
+  additions: Record<string, AddedPerson>
+  /** Sheet people hidden from the chart (added people are dropped outright instead). */
+  removed: Record<string, true>
 }
 
 /** The fully-derived org, consumed by every view. */
