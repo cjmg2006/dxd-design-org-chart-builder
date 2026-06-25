@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useOrg } from './data/useOrg'
 import { applyEdits } from './data/org'
 import { OrgEditsProvider, useOrgEdits } from './data/orgEdits'
@@ -10,6 +10,8 @@ import { SearchBox } from './components/SearchBox'
 import { DomainFilter } from './components/DomainFilter'
 import { Legend } from './components/Legend'
 import { PersonDetail } from './components/PersonDetail'
+import { AddPersonDialog } from './components/AddPersonDialog'
+import { HistoryDialog } from './components/HistoryDialog'
 import { DirectoryView } from './views/DirectoryView'
 import { TreeView } from './views/TreeView'
 import { ExplorerView } from './views/ExplorerView'
@@ -54,6 +56,15 @@ export default function App() {
   const [domain, setDomain] = useState<DomainFilterValue>('All')
   const [selected, setSelected] = useState<Person | null>(null)
   const pendingPerson = useRef<string | null>(initialParams.get('person'))
+  // The "add a person" form: open state + the manager to pre-fill (null = none).
+  const [addOpen, setAddOpen] = useState(false)
+  const [addManager, setAddManager] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+
+  const openAdd = useCallback((managerName?: string) => {
+    setAddManager(managerName ?? null)
+    setAddOpen(true)
+  }, [])
 
   // Deep-link: resolve ?person once the org has loaded (using the slug captured
   // on mount, so the URL-sync effect below can't wipe it first).
@@ -102,15 +113,21 @@ export default function App() {
 
       <header className="sticky top-0 z-30 border-b border-border bg-surface/95 backdrop-blur">
         <div className={cn('px-4 py-3 sm:px-6', !wide && 'mx-auto max-w-[88rem]')}>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-2.5">
-              <LogoMark />
-              <div>
-                <h1 className="font-display text-base font-semibold leading-tight text-ink">
-                  DXD Design Team
-                </h1>
-                <p className="text-2xs text-ink-muted">Ministry of Education Singapore</p>
+          {/* Brand + filters (left) share a bottom baseline with the search /
+              view controls (right) via lg:items-end, so FIND PEOPLE and VIEW
+              line up with the domain filter pills. */}
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2.5">
+                <LogoMark />
+                <div>
+                  <h1 className="font-display text-base font-semibold leading-tight text-ink">
+                    DXD Design Team
+                  </h1>
+                  <p className="text-2xs text-ink-muted">Ministry of Education Singapore</p>
+                </div>
               </div>
+              <DomainFilter value={domain} onChange={setDomain} />
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end">
               <SearchBox value={query} onChange={setQuery} resultCount={resultCount} total={org?.people.length ?? 0} />
@@ -121,9 +138,6 @@ export default function App() {
                 </div>
               </div>
             </div>
-          </div>
-          <div className="mt-3">
-            <DomainFilter value={domain} onChange={setDomain} />
           </div>
         </div>
       </header>
@@ -137,14 +151,32 @@ export default function App() {
               <Legend />
             </div>
             <div className={cn(!wide && 'mx-auto max-w-[88rem]')}>
-              <ViewComponent org={effectiveOrg} query={query} domain={domain} onSelect={setSelected} />
+              <ViewComponent
+                org={effectiveOrg}
+                query={query}
+                domain={domain}
+                onSelect={setSelected}
+                onAddPerson={openAdd}
+                onOpenHistory={() => setHistoryOpen(true)}
+              />
             </div>
             <PersonDetail
               org={effectiveOrg}
               person={selected}
               onClose={() => setSelected(null)}
               onNavigate={(p) => setSelected(p)}
+              onAddReport={(managerName) => {
+                setSelected(null) // hand off to the add form rather than stacking dialogs
+                openAdd(managerName)
+              }}
             />
+            <AddPersonDialog
+              org={effectiveOrg}
+              open={addOpen}
+              defaultManager={addManager}
+              onClose={() => setAddOpen(false)}
+            />
+            <HistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
           </OrgEditsProvider>
         )}
       </main>

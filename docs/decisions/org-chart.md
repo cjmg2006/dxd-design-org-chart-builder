@@ -306,3 +306,122 @@ edits but stays read-only (the dialog is the edit surface). Verified in-browser 
 pickers show correct current values; editing Product→Markly re-files Elky under the Markly group in
 Teams and survives reload; re-parenting Elky→Gloria recomputes peers 12→10 and persists; Edit canvas
 (drag + 32 inline pickers) intact; no console errors; `tsc -b` + `npm run build` clean.
+
+## 80% default zoom + add-a-person + shared collaborative editing (user-directed, 2026-06-25)
+
+Wondo asked for three things: (1) the Org Chart should **open at 80% zoom** (not fit-to-screen);
+(2) once in Edit, a way to **add a new person** — offered three placements; (3) **open it to the
+public with shared edit access, capturing all edits.**
+
+**1 — 80% default zoom.** The Org Chart canvas previously opened via `fit()` (zoom-to-fit-all). It
+now opens at a fixed `DEFAULT_SCALE = 0.8`, root centred horizontally and anchored near the top
+(`openAtDefault()` in `TreeView.tsx`), so the first thing you see is readable cards, not a bird's-eye.
+The auto-refit-on-reflow/resize paths now re-apply the 80% default (until the user pans/zooms);
+the explicit **"Zoom to fit"** button (the % chip) still scales the whole org into view on demand.
+
+**2 — Add a person (all three placements built, sharing one form).** Per the *show-don't-tell*
+preference, all three entry points were implemented so they can be compared live; each opens one
+shared `AddPersonDialog` (Name · Reports to · Specialty · Domain · Product · Type), with *Reports to*
+pre-filled from wherever it was launched:
+- **Edit-toolbar "Add person"** (next to Done) — add anyone, pick their manager.
+- **Card hover/focus "+"** on the Edit canvas (`DraggableNode`) — adds a report under that card.
+- **"Add a report to {name}"** in the person detail dialog (`PersonDetail`).
+
+Added people are stored as a new `additions` map on `OrgEdits` (full records, since there's no sheet
+row to fall back to); `applyEdits()` builds them into the effective org *before* the override maps
+apply, so an added card can be re-parented / re-domained / dragged exactly like a sheet person.
+After creating, the new person's detail auto-opens. (Storage key stays `…-v3`; `additions` defaults
+to `{}` so existing layouts migrate.)
+
+**3 — Shared, login-free collaborative editing + captured history** (Wondo's choices via clickable
+options: **"Shared doc, login-free"** + **"Timestamps only"**). The per-browser `localStorage` store
+was promoted to a **single shared document**:
+- *Backend:* two Vercel Functions — `api/edits.ts` (GET / PUT one `OrgEdits` doc with a monotonic
+  `version`; last-write-wins) and `api/history.ts` (GET / POST an append-only, capped, anonymous
+  `{ts, action, summary}` log) — over an Upstash Redis (Vercel Marketplace) REST store. Reads
+  `KV_REST_API_*` / `UPSTASH_REDIS_REST_*` env vars; with no store linked it **503s and the client
+  silently falls back to local-only**, so the app never breaks pre-provisioning.
+- *Client* (`orgEdits.tsx` + `sharedStore.ts`): loads the shared doc on open (localStorage = instant
+  first paint + offline cache), **debounced-saves** local changes, **polls every 5 s** and adopts the
+  remote doc when its version moved and we're settled (guards against clobbering an in-flight local
+  save). Each *semantic* edit (add / remove / reparent / domain / product / reset) logs a timestamped
+  history entry; position drags save but are excluded from history as noise.
+- *History UI:* a **"Recent changes"** dialog (`HistoryDialog`) opened from a History button in the
+  Edit toolbar, newest-first, fetched fresh on open.
+- *Local dev:* a Vite middleware plugin (`vite.config.ts`) mirrors both routes against a gitignored
+  `.dev-store.json`, so `vite dev` (and two tabs) share one store with no backend.
+
+**Decisions / trade-offs.**
+- *Login-free, last-write-wins* (per Wondo + the standing "defer auth until dogfoodable" call): no
+  accounts; simultaneous edits resolve to the latest whole-doc write. Field-level merge / presence
+  was rejected as over-built for a ~35-person, low-contention chart.
+- *Timestamps only* (no "who"): no name prompt; the log captures what changed and when.
+- *Polling, not websockets:* ~5 s freshness is plenty here and keeps the app on plain Vercel
+  Functions with zero extra services.
+
+**Provisioning (handoff).** Add an Upstash Redis via the Vercel Marketplace and connect it to the
+project (injects the REST env vars), then redeploy — see README → *Shared editing*. Until then the
+deployed site is publicly viewable and edits stay per-browser.
+
+**Verified locally (:8731, dev file-store).** Two separate browser sessions share one store: session
+A's *Add person* ("Casey Lim") persisted (`version` bumped) and logged `added "Casey Lim" → Darren
+Yeo`; a fresh session B **loaded that person from the shared doc** and showed the history entry; a
+remote write was **picked up by B's poll within ~7 s without reload**. API exercised directly via
+curl (GET/PUT versioning, POST/GET history). 80% open + all three add entry points confirmed in
+browser. `tsc -b` + `npm run build` clean. (Note: Base UI rc.0's dialog exit-transition leaves a
+transparent backdrop in the headless automation browser — the pre-existing detail dialog behaves
+identically there — which is an automation-env artifact, not a regression; it clears in a real browser.)
+
+### Follow-up: UX fixes + ce-code-review pass (user-directed, 2026-06-25)
+
+Wondo, testing the deployed cut, asked for three things and a review: (1) **the add-person journey
+should end on add** — the auto-open of the new person's detail was confusing; (2) **delete a
+person** was missing; (3) run **/ce-code-review** to confirm the workflow and fundamental
+interactions are sound. Also a header tweak: **FIND PEOPLE + VIEW bottom-aligned with the domain
+filter pills** (now one row, brand+filters left / search+view right, `lg:items-end`).
+
+**Add ends on add.** Dropped the `pendingSelect` auto-open; `AddPersonDialog` now just adds + closes.
+
+**Delete a person.** A destructive "Remove from chart" with a two-step inline confirm (CMP-2 — now
+in scope; the original record marked it N/A pre-editing) in the person detail dialog. Added a
+`removed` map to `OrgEdits`: an *added* person is dropped from `additions`; a *sheet* person is
+hidden via `removed` (a sheet re-fetch can't resurrect them); `applyEdits` filters both. To keep the
+tree connected, the removed person's direct reports + mentees are **promoted to their manager** (or
+to the root if they had none) as a hard override, in **one atomic edit + one history line** (e.g.
+`removed "Emily Ong" (1 report moved to Darren Yeo)`). The root can't be removed. "Reset edits"
+clears `removed` too.
+
+**Review (8 persona reviewers: correctness, adversarial, reliability, security, maintainability,
+kieran-typescript, api-contract, agent-native).** Fixed the consensus issues:
+- **Wrong-person delete risk (P1)** — `DetailBody` had no React `key`, so the open remove-confirm
+  panel carried across in-dialog navigation; added `key={person.name}`.
+- **Save-failure data loss (P1)** — a failed save left `localChange` cleared, so the next poll could
+  clobber the unsaved edit. Now re-arms `localChange` on failure (poll skips) and schedules a bounded
+  retry. Added **request timeouts** (`AbortSignal.timeout`) to all client fetches so a hung request
+  can't wedge the save/poll guards permanently.
+- **Non-atomic version (P1)** — `PUT /api/edits` derived `version` from a separate GET; two
+  concurrent writers could collide on the same number and defeat poll change-detection. Switched to
+  an atomic Redis `INCR` counter (data stays whole-doc last-write-wins by design; the version is now
+  strictly monotonic).
+- **Unvalidated public write (P1, security/adversarial)** — `PUT /api/edits` now rejects oversized
+  (>256 KB → 413) and malformed (non-object edit maps → 400) payloads; `POST /api/history` caps
+  `action`/`summary` length; history `limit` is clamped to ≥1.
+- **Re-add after remove (P2)** — `addPerson` now clears any `removed` entry for that name (else the
+  re-added person was silently filtered out).
+- **`EMPTY` drift (P2)** — added the missing `removed: {}` to the `api/edits.ts` and `vite.config.ts`
+  EMPTY constants so the server-emitted doc matches the `OrgEdits` type.
+- **Orphan on dangling manager (P2)** — `applyEdits` now re-homes anyone whose (override) manager no
+  longer exists onto the root instead of letting them vanish.
+- **Edit-during-load clobber (P2)** — the initial shared load no longer adopts the remote doc if the
+  user already started editing.
+
+**Accepted / deferred (named):** whole-document last-write-wins is the intended low-contention model
+(the `INCR` fix removes the version-collision detection bug, not the data LWW); the `redis()`/`env()`
+helper duplication across the two functions is per-function serverless isolation; the dev file-store's
+non-atomic write is dev-only; **there is no automated test suite in the repo** — the reviewers' testing
+gaps (race/edge coverage for the save-poll machine and add/remove) are real but out of scope for this
+change and noted for a future test pass.
+
+**Re-verified in-browser (dev file store):** removing Emily Ong (1 report) promotes Tze Eng Tan →
+Darren Yeo with a single history entry; re-adding a removed name now appears; add ends with no
+dialog; header bottom-alignment holds. `tsc -b` + `npm run build` clean.

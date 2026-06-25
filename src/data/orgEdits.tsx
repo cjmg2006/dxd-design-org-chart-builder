@@ -1,38 +1,60 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { Domain, Org, OrgEdits } from './types'
+import type { AddedPerson, Domain, Org, OrgEdits } from './types'
+import { fetchEdits, saveEdits as saveRemote, logHistory } from './sharedStore'
 
-// Persisted custom arrangement, keyed by person name:
+// Custom arrangement, keyed by person name:
 //   positions   — cards the user has dragged on the edit canvas ({x,y})
 //   managers    — people re-parented via a new "Reports to" target
 //   domains     — people moved to a different domain
 //   workstreams — people moved to a different product ('' clears it)
+//   additions   — people added by hand (full record; not in the sheet)
 // Only customised people are stored; everyone else falls back to the sheet's
 // values and the tidy computed layout, so the chart survives sheet changes.
+//
+// Persistence is a SHARED document (api/edits.ts): everyone edits one chart,
+// loaded on open and re-fetched by a poll so others' changes appear within a few
+// seconds (last-write-wins). localStorage is kept as an offline cache + instant
+// first paint, and is the sole store when no backend is reachable.
 const STORAGE_KEY = 'dxd-orgchart-layout-v3'
-const EMPTY_EDITS: OrgEdits = { positions: {}, managers: {}, domains: {}, workstreams: {} }
+const EMPTY_EDITS: OrgEdits = {
+  positions: {},
+  managers: {},
+  domains: {},
+  workstreams: {},
+  additions: {},
+  removed: {},
+}
+const SAVE_DEBOUNCE_MS = 600 // coalesce rapid edits (e.g. a drag) into one save
+const SAVE_RETRY_MS = 3000 // back off this long before retrying a failed save
+const POLL_MS = 5000 // how often to pick up other people's edits
 
-function loadEdits(): OrgEdits {
+/** Fill in any missing keys so a partial doc (old cache / remote) is always whole. */
+function normalize(d: Partial<OrgEdits> | undefined | null): OrgEdits {
+  return {
+    positions: d?.positions ?? {},
+    managers: d?.managers ?? {},
+    domains: d?.domains ?? {},
+    workstreams: d?.workstreams ?? {},
+    additions: d?.additions ?? {},
+    removed: d?.removed ?? {},
+  }
+}
+
+function loadCache(): OrgEdits {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return EMPTY_EDITS
-    const parsed = JSON.parse(raw) as Partial<OrgEdits>
-    return {
-      positions: parsed.positions ?? {},
-      managers: parsed.managers ?? {},
-      domains: parsed.domains ?? {},
-      workstreams: parsed.workstreams ?? {},
-    }
+    return raw ? normalize(JSON.parse(raw) as Partial<OrgEdits>) : EMPTY_EDITS
   } catch {
     return EMPTY_EDITS
   }
 }
 
-function saveEdits(e: OrgEdits) {
+function writeCache(e: OrgEdits) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(e))
   } catch {
-    /* storage unavailable (private mode / quota) — edits just won't persist */
+    /* storage unavailable (private mode / quota) — cache just won't persist */
   }
 }
 
@@ -54,67 +76,209 @@ export interface OrgEditsApi {
   setDomain: (name: string, newDomain: Domain, originalDomain: Domain) => void
   /** Move a person to a product. Passing their original workstream clears the override. */
   setWorkstream: (name: string, newWorkstream: string, originalWorkstream: string) => void
-  /** Clear every override (positions, managers, domains, products). */
+  /** Add a hand-entered person (reporting to an existing manager). */
+  addPerson: (person: AddedPerson) => void
+  /** Remove a person (added → dropped; sheet → hidden). Optionally promote their
+   *  reports onto a new manager so the tree stays connected. */
+  removePerson: (name: string, promote?: { toManager: string; reportNames: string[] }) => void
+  /** Clear every override (positions, managers, domains, products, additions). */
   reset: () => void
   hasEdits: boolean
 }
 
-/** The persisted-edits state machine. One instance lives at the app root. */
+/** The shared-edits state machine. One instance lives at the app root. */
 export function useOrgEdits(): OrgEditsApi {
-  const [edits, setEdits] = useState<OrgEdits>(loadEdits)
-  useEffect(() => saveEdits(edits), [edits])
+  const [edits, setEdits] = useState<OrgEdits>(loadCache) // cached copy → instant first paint
+  const remoteEnabled = useRef(false) // a backend answered → save/poll/log are live
+  const version = useRef(0) // last shared-doc version we've seen
+  const loaded = useRef(false) // initial shared load has settled
+  const localChange = useRef(false) // the pending edit came from THIS client (→ push it)
+  const pendingSave = useRef(false) // a debounced save is scheduled or in flight
+  const saving = useRef(false) // a save request is in flight
+  const saveTimer = useRef<number | undefined>(undefined)
 
-  const commitNode = useCallback(
-    (name: string, x: number, y: number) =>
-      setEdits((e) => ({ ...e, positions: { ...e.positions, [name]: { x, y } } })),
-    [],
-  )
+  // Log a history entry only when a real backend is present (best-effort).
+  const note = useCallback((action: string, summary: string) => {
+    if (remoteEnabled.current) logHistory(action, summary)
+  }, [])
+
+  // ── Initial load: adopt the shared doc, or seed it from our cache ───────────
+  useEffect(() => {
+    const ctrl = new AbortController()
+    fetchEdits(ctrl.signal)
+      .then((doc) => {
+        remoteEnabled.current = true
+        version.current = doc.version
+        if (doc.version > 0 && !localChange.current) {
+          setEdits(normalize(doc.data)) // someone has already shared a chart
+        } else {
+          // Empty shared doc, OR the user started editing before the load
+          // resolved — keep local and push it up (don't clobber their edit).
+          localChange.current = true
+          setEdits((e) => ({ ...e }))
+        }
+        loaded.current = true
+      })
+      .catch(() => {
+        // No backend / offline → local-only, exactly as before.
+        remoteEnabled.current = false
+        loaded.current = true
+      })
+    return () => ctrl.abort()
+  }, [])
+
+  // ── Offline cache: mirror every state into localStorage ─────────────────────
+  useEffect(() => {
+    writeCache(edits)
+  }, [edits])
+
+  // ── Debounced shared save, only for changes that originated locally ─────────
+  useEffect(() => {
+    if (!loaded.current || !remoteEnabled.current || !localChange.current) return
+    localChange.current = false
+    pendingSave.current = true
+    const snapshot = edits
+    window.clearTimeout(saveTimer.current)
+    saveTimer.current = window.setTimeout(() => {
+      saving.current = true
+      saveRemote(snapshot)
+        .then((r) => {
+          version.current = r.version
+        })
+        .catch(() => {
+          // Save failed (offline/timeout/5xx). Re-arm localChange so the poll
+          // can't overwrite this still-unsaved edit, and schedule a retry that
+          // re-runs this effect with the latest state.
+          localChange.current = true
+          window.clearTimeout(saveTimer.current)
+          saveTimer.current = window.setTimeout(() => setEdits((e) => ({ ...e })), SAVE_RETRY_MS)
+        })
+        .finally(() => {
+          saving.current = false
+          pendingSave.current = false
+        })
+    }, SAVE_DEBOUNCE_MS)
+  }, [edits])
+
+  // ── Poll for others' edits; adopt when the doc moved and we're settled ──────
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!remoteEnabled.current || saving.current || pendingSave.current || localChange.current) return
+      fetchEdits()
+        .then((doc) => {
+          if (doc.version !== version.current) {
+            version.current = doc.version
+            setEdits(normalize(doc.data))
+          }
+        })
+        .catch(() => {})
+    }, POLL_MS)
+    return () => window.clearInterval(id)
+  }, [])
+
+  const commitNode = useCallback((name: string, x: number, y: number) => {
+    localChange.current = true // positions are shared, but too noisy for history
+    setEdits((e) => ({ ...e, positions: { ...e.positions, [name]: { x, y } } }))
+  }, [])
   const reparent = useCallback(
-    (name: string, newManager: string, originalManager: string | null) =>
+    (name: string, newManager: string, originalManager: string | null) => {
+      localChange.current = true
+      const cleared = newManager === (originalManager ?? '')
       setEdits((e) => ({
         ...e,
-        managers:
-          newManager === (originalManager ?? '')
-            ? without(e.managers, name)
-            : { ...e.managers, [name]: newManager },
-      })),
-    [],
+        managers: cleared ? without(e.managers, name) : { ...e.managers, [name]: newManager },
+      }))
+      note('reparent', cleared ? `reset ${name}'s manager` : `reparented ${name} → ${newManager}`)
+    },
+    [note],
   )
   const setDomain = useCallback(
-    (name: string, newDomain: Domain, originalDomain: Domain) =>
+    (name: string, newDomain: Domain, originalDomain: Domain) => {
+      localChange.current = true
+      const cleared = newDomain === originalDomain
       setEdits((e) => ({
         ...e,
-        domains:
-          newDomain === originalDomain
-            ? without(e.domains, name)
-            : { ...e.domains, [name]: newDomain },
-      })),
-    [],
+        domains: cleared ? without(e.domains, name) : { ...e.domains, [name]: newDomain },
+      }))
+      note('domain', cleared ? `reset ${name}'s domain` : `set ${name}'s domain → ${newDomain}`)
+    },
+    [note],
   )
   const setWorkstream = useCallback(
-    (name: string, newWorkstream: string, originalWorkstream: string) =>
+    (name: string, newWorkstream: string, originalWorkstream: string) => {
+      localChange.current = true
+      const cleared = newWorkstream === originalWorkstream
       setEdits((e) => ({
         ...e,
-        workstreams:
-          newWorkstream === originalWorkstream
-            ? without(e.workstreams, name)
-            : { ...e.workstreams, [name]: newWorkstream },
-      })),
-    [],
+        workstreams: cleared ? without(e.workstreams, name) : { ...e.workstreams, [name]: newWorkstream },
+      }))
+      note('product', cleared ? `reset ${name}'s product` : `set ${name}'s product → ${newWorkstream || 'none'}`)
+    },
+    [note],
   )
-  const reset = useCallback(() => setEdits(EMPTY_EDITS), [])
+  const addPerson = useCallback(
+    (person: AddedPerson) => {
+      localChange.current = true
+      // Clear any prior removal of this name so re-adding a removed person works.
+      setEdits((e) => ({
+        ...e,
+        additions: { ...e.additions, [person.name]: person },
+        removed: without(e.removed, person.name),
+      }))
+      note('add', `added “${person.name}” → ${person.managerName}`)
+    },
+    [note],
+  )
+  const removePerson = useCallback(
+    (name: string, promote?: { toManager: string; reportNames: string[] }) => {
+      localChange.current = true
+      setEdits((e) => {
+        // Promote the removed person's reports onto the new manager (a hard
+        // override, so they land there regardless of their sheet manager).
+        const managers = { ...e.managers }
+        if (promote) for (const r of promote.reportNames) managers[r] = promote.toManager
+        delete managers[name]
+        // An added person is dropped outright; a sheet person is hidden via the
+        // `removed` set (so a sheet re-fetch can't resurrect them).
+        const wasAdded = name in e.additions
+        return {
+          ...e,
+          managers,
+          additions: without(e.additions, name),
+          positions: without(e.positions, name),
+          domains: without(e.domains, name),
+          workstreams: without(e.workstreams, name),
+          removed: wasAdded ? e.removed : { ...e.removed, [name]: true },
+        }
+      })
+      // One history line for the whole operation (no per-report reparent spam).
+      const n = promote?.reportNames.length ?? 0
+      note(
+        'remove',
+        n > 0 ? `removed “${name}” (${n} report${n > 1 ? 's' : ''} moved to ${promote!.toManager})` : `removed “${name}”`,
+      )
+    },
+    [note],
+  )
+  const reset = useCallback(() => {
+    localChange.current = true
+    setEdits(EMPTY_EDITS)
+    note('reset', 'reset all edits')
+  }, [note])
 
   const hasEdits =
     Object.keys(edits.positions).length > 0 ||
     Object.keys(edits.managers).length > 0 ||
     Object.keys(edits.domains).length > 0 ||
-    Object.keys(edits.workstreams).length > 0
+    Object.keys(edits.workstreams).length > 0 ||
+    Object.keys(edits.additions).length > 0 ||
+    Object.keys(edits.removed).length > 0
 
   // Stable reference between edits — the callbacks never change, so consumers
   // (the edit canvas, the detail dialog) only re-render when the edits change.
   return useMemo(
-    () => ({ edits, commitNode, reparent, setDomain, setWorkstream, reset, hasEdits }),
-    [edits, commitNode, reparent, setDomain, setWorkstream, reset, hasEdits],
+    () => ({ edits, commitNode, reparent, setDomain, setWorkstream, addPerson, removePerson, reset, hasEdits }),
+    [edits, commitNode, reparent, setDomain, setWorkstream, addPerson, removePerson, reset, hasEdits],
   )
 }
 

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Dialog } from '@base-ui-components/react/dialog'
 import type { Domain, Org, Person } from '@/data/types'
 import { managerCandidates, managerOf, peersOf, reportsOf, menteesOf } from '@/data/org'
@@ -15,9 +15,11 @@ interface PersonDetailProps {
   onClose: () => void
   /** Navigate to a related person inside the open dialog. */
   onNavigate: (person: Person) => void
+  /** Open the add-a-person form, pre-filled to report to this person. */
+  onAddReport?: (managerName: string) => void
 }
 
-export function PersonDetail({ org, person, onClose, onNavigate }: PersonDetailProps) {
+export function PersonDetail({ org, person, onClose, onNavigate, onAddReport }: PersonDetailProps) {
   return (
     <Dialog.Root
       open={!!person}
@@ -34,7 +36,16 @@ export function PersonDetail({ org, person, onClose, onNavigate }: PersonDetailP
             'transition-all duration-150 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
           )}
         >
-          {person && <DetailBody org={org} person={person} onNavigate={onNavigate} />}
+          {person && (
+            <DetailBody
+              key={person.name}
+              org={org}
+              person={person}
+              onNavigate={onNavigate}
+              onAddReport={onAddReport}
+              onRemoved={onClose}
+            />
+          )}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
@@ -51,12 +62,17 @@ function DetailBody({
   org,
   person,
   onNavigate,
+  onAddReport,
+  onRemoved,
 }: {
   org: Org
   person: Person
   onNavigate: (p: Person) => void
+  onAddReport?: (managerName: string) => void
+  onRemoved: () => void
 }) {
-  const { baseOrg, reparent, setDomain, setWorkstream } = useOrgEditsContext()
+  const { baseOrg, reparent, setDomain, setWorkstream, removePerson } = useOrgEditsContext()
+  const [confirmingRemove, setConfirmingRemove] = useState(false)
   // Always render from the live record (overrides applied), falling back to the
   // snapshot we were handed if the person isn't in the derived maps.
   const live = liveOf(org, person.name) ?? person
@@ -78,6 +94,18 @@ function DetailBody({
   // Keep an unlisted current value (e.g. a multi-workstream sheet entry) pickable.
   const extraProduct =
     currentWorkstream && !productOptions.includes(currentWorkstream) ? currentWorkstream : null
+
+  // Remove from the chart. To keep the tree connected, the person's direct
+  // reports + mentees are promoted to that person's own manager (one atomic edit
+  // + one history entry, handled in removePerson). A non-root person with no
+  // manager promotes their reports to the root. The root itself can't be removed.
+  const directCount = reports.length + mentees.length
+  const handleRemove = () => {
+    const toManager = live.managerName ?? org.root.name
+    const reportNames = [...reports, ...mentees].map((c) => c.name)
+    removePerson(live.name, reportNames.length ? { toManager, reportNames } : undefined)
+    onRemoved()
+  }
 
   return (
     <div>
@@ -179,6 +207,19 @@ function DetailBody({
         </dl>
       )}
 
+      {onAddReport && (
+        <button
+          type="button"
+          onClick={() => onAddReport(live.name)}
+          className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-chip border border-border bg-surface px-3 text-sm font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.8}>
+            <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+          </svg>
+          Add a report to {live.name.split(' ')[0]}
+        </button>
+      )}
+
       {reports.length > 0 && (
         <RelatedGroup label={`Direct reports (${reports.length})`} people={reports} onNavigate={onNavigate} />
       )}
@@ -199,6 +240,54 @@ function DetailBody({
         <div className="mt-4 rounded-card bg-surface-2 p-3 text-sm text-ink-secondary">
           <span className="font-semibold text-ink-secondary">Note: </span>
           {live.remarks}
+        </div>
+      )}
+
+      {/* Destructive: remove from the chart. Two-step confirm (CMP-2). The root
+          has no manager to promote anyone to, so it can't be removed. */}
+      {!isRoot && (
+        <div className="mt-4 border-t border-border pt-3">
+          {confirmingRemove ? (
+            <div className="rounded-card border border-leave-border bg-leave-soft p-3">
+              <p className="text-sm text-ink">
+                Remove <span className="font-semibold">{live.name}</span> from the chart?
+                {directCount > 0 && (
+                  <>
+                    {' '}
+                    Their {directCount} report{directCount > 1 ? 's' : ''} will move to{' '}
+                    <span className="font-semibold">{manager?.name ?? 'their manager'}</span>.
+                  </>
+                )}
+              </p>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmingRemove(false)}
+                  className="inline-flex h-9 items-center rounded-chip border border-border bg-surface px-3 text-sm font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRemove}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-chip bg-leave-text px-3 text-sm font-semibold text-surface hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leave-text"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingRemove(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-chip px-3 text-sm font-medium text-leave-text hover:bg-leave-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leave-text"
+            >
+              <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.6}>
+                <path d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.5 8.5h5l.5-8.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Remove from chart
+            </button>
+          )}
         </div>
       )}
     </div>
