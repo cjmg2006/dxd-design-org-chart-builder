@@ -114,6 +114,13 @@ function TreeCanvas({
   const userMoved = useRef(false) // once true, stop auto-refitting on a content reflow
   const [zoomPct, setZoomPct] = useState(100)
   const [panning, setPanning] = useState(false)
+  // Maximise: expand the board to fill the whole window (over the page chrome) so
+  // a wide org has room to breathe. Esc or the minimise button returns it.
+  const [maximized, setMaximized] = useState(false)
+  const toggleMax = useCallback(() => {
+    userMoved.current = false // re-centre the chart in the new canvas size
+    setMaximized((m) => !m)
+  }, [])
 
   // Edit mode: switch the static tree for a positioned, draggable graph whose
   // reporting lines re-route live as cards move — and where a card's manager can
@@ -161,12 +168,15 @@ function TreeCanvas({
     setZoomPct(Math.round(s * 100))
   }
 
-  // Fill the board to the viewport below its top (imperative height → no flash).
+  // Fill the board: the whole window when maximised, otherwise the viewport below
+  // its top (imperative height → no flash).
   const sizeBoard = useCallback(() => {
     const vp = viewportRef.current
     if (!vp) return
-    vp.style.height = `${Math.max(MIN_BOARD_HEIGHT, window.innerHeight - vp.getBoundingClientRect().top - 16)}px`
-  }, [])
+    vp.style.height = maximized
+      ? `${window.innerHeight}px`
+      : `${Math.max(MIN_BOARD_HEIGHT, window.innerHeight - vp.getBoundingClientRect().top - 16)}px`
+  }, [maximized])
 
   // Zoom-to-fit the whole chart, centred — the explicit "Zoom to fit" action.
   const fit = useCallback(() => {
@@ -238,6 +248,22 @@ function TreeCanvas({
       window.removeEventListener('resize', onResize)
     }
   }, [sizeBoard, openAtDefault])
+
+  // While maximised: lock page scroll behind the overlay and let Esc minimise
+  // (but not when a dialog is open — Esc should close that first).
+  useEffect(() => {
+    if (!maximized) return
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !document.querySelector('[role="dialog"]')) setMaximized(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [maximized])
 
   // Wheel: two-finger swipe / wheel pans; pinch or ⌘/Ctrl-scroll zooms to the cursor.
   // Native non-passive listener so preventDefault stops the page itself from scrolling.
@@ -329,7 +355,8 @@ function TreeCanvas({
           : {}),
       }}
       className={cn(
-        'relative select-none overflow-hidden rounded-card border bg-surface',
+        'select-none overflow-hidden border bg-surface',
+        maximized ? 'fixed inset-0 z-40' : 'relative rounded-card',
         editing ? 'border-primary/40' : 'border-border',
         panning ? 'cursor-grabbing' : 'cursor-grab',
       )}
@@ -361,6 +388,8 @@ function TreeCanvas({
         onOut={() => zoomByButton(1 / ZOOM_BTN_STEP)}
         onIn={() => zoomByButton(ZOOM_BTN_STEP)}
         onReset={fit}
+        maximized={maximized}
+        onToggleMax={toggleMax}
       />
 
       <EditToolbar
@@ -490,11 +519,15 @@ function CanvasControls({
   onOut,
   onIn,
   onReset,
+  maximized,
+  onToggleMax,
 }: {
   zoomPct: number
   onOut: () => void
   onIn: () => void
   onReset: () => void
+  maximized: boolean
+  onToggleMax: () => void
 }) {
   const btn =
     'inline-flex size-8 items-center justify-center rounded-chip border border-border bg-surface text-ink-secondary shadow-sm transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40'
@@ -519,6 +552,23 @@ function CanvasControls({
       <button type="button" onClick={onIn} disabled={zoomPct >= SCALE_MAX * 100} aria-label="Zoom in" className={btn}>
         <svg aria-hidden viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth={1.6}>
           <path d="M8 4v8M4 8h8" strokeLinecap="round" />
+        </svg>
+      </button>
+      {/* Maximise / minimise the canvas to fill the window. */}
+      <button
+        type="button"
+        onClick={onToggleMax}
+        aria-pressed={maximized}
+        aria-label={maximized ? 'Minimise canvas' : 'Maximise canvas'}
+        title={maximized ? 'Minimise (Esc)' : 'Maximise canvas'}
+        className={cn(btn, 'ml-0.5')}
+      >
+        <svg aria-hidden viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth={1.6}>
+          {maximized ? (
+            <path d="M6 3v3H3M10 3v3h3M6 13v-3H3M10 13v-3h3" strokeLinecap="round" strokeLinejoin="round" />
+          ) : (
+            <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" strokeLinecap="round" strokeLinejoin="round" />
+          )}
         </svg>
       </button>
     </div>
