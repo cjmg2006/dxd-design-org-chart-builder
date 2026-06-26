@@ -112,6 +112,36 @@ export interface AddedPerson {
   employment: EmploymentType
 }
 
+/** An in-app edit of a person's "human" profile (the detail page). When present
+ *  for a person it is the full source of truth for their profile text (the baked
+ *  data in data/profiles.ts is only the starting point); photos live in their own
+ *  store (api/profile-photo.ts) and are referenced by the `photo` marker. */
+export interface ProfileOverride {
+  emoji?: string
+  jobTitle?: string
+  /** 'custom' → a photo saved at /api/profile-photo; '' → explicitly none (hide
+   *  the baked photo); absent → fall back to the baked photo. */
+  photo?: 'custom' | ''
+  /** Bumped on each upload so other clients' cached <img> refetches. */
+  photoV?: number
+  personality?: string[]
+  askMeAbout?: string[]
+  workingStyle?: string[]
+  communicationStyle?: string[]
+  role?: string[]
+  responsibilities?: string[]
+  successLooksLike?: string[]
+  supportNeeded?: string[]
+  petPeeves?: string[]
+  otherCommitments?: string[]
+  specialisedIn?: string[]
+  contributions?: string[]
+  joined?: string
+  email?: string
+  linkedin?: string
+  portfolio?: string
+}
+
 /** User overrides applied on top of the sheet-derived org, persisted per browser.
  *  Only customised people are stored; everyone else falls back to the sheet. */
 export interface OrgEdits {
@@ -127,6 +157,8 @@ export interface OrgEdits {
   additions: Record<string, AddedPerson>
   /** Sheet people hidden from the chart (added people are dropped outright instead). */
   removed: Record<string, true>
+  /** In-app profile edits (detail page), keyed by name. */
+  profiles: Record<string, ProfileOverride>
 }
 
 /** The fully-derived org, consumed by every view. */

@@ -5,7 +5,8 @@ import { matchesQuery, type ViewProps } from '@/lib/filter'
 import { DOMAIN_LABEL } from '@/data/constants'
 import { DOMAIN_STYLE } from '@/lib/styles'
 import { PersonCard } from '@/components/PersonCard'
-import { DomainDot, Initials } from '@/components/primitives'
+import { Avatar, DomainDot } from '@/components/primitives'
+import { useProfile } from '@/data/profileViewer'
 import { cn } from '@/lib/cn'
 
 interface GhostEntry {
@@ -165,6 +166,7 @@ function LeadCard({
   onSelect: (p: Person) => void
   isRoot?: boolean
 }) {
+  const profile = useProfile(person)
   return (
     <button
       type="button"
@@ -176,7 +178,7 @@ function LeadCard({
         isRoot ? 'border-primary/40' : 'border-border hover:border-border-strong',
       )}
     >
-      <Initials name={person.name} className="size-9 text-sm" />
+      <Avatar name={person.name} photo={profile?.photo} className="size-9 text-sm" />
       <div className="min-w-0">
         <div className="truncate text-sm font-semibold text-ink">{person.name}</div>
         <div className="truncate text-2xs text-ink-muted">{subtitle}</div>

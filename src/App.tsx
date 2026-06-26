@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useOrg } from './data/useOrg'
 import { applyEdits } from './data/org'
 import { OrgEditsProvider, useOrgEdits } from './data/orgEdits'
+import { ProfileViewerProvider } from './data/profileViewer'
 import type { Person } from './data/types'
 import { isMatch, type DomainFilter as DomainFilterValue, type ViewProps } from './lib/filter'
 import { cn } from './lib/cn'
@@ -10,6 +11,7 @@ import { SearchBox } from './components/SearchBox'
 import { DomainFilter } from './components/DomainFilter'
 import { Legend } from './components/Legend'
 import { PersonDetail } from './components/PersonDetail'
+import { ProfileModal } from './components/ProfileModal'
 import { AddPersonDialog } from './components/AddPersonDialog'
 import { HistoryDialog } from './components/HistoryDialog'
 import { DirectoryView } from './views/DirectoryView'
@@ -55,6 +57,9 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [domain, setDomain] = useState<DomainFilterValue>('All')
   const [selected, setSelected] = useState<Person | null>(null)
+  // The full "human" profile modal — opened from a card photo or the detail
+  // dialog. Opening it hands off from the edit dialog (one overlay at a time).
+  const [profilePerson, setProfilePerson] = useState<Person | null>(null)
   const pendingPerson = useRef<string | null>(initialParams.get('person'))
   // The "add a person" form: open state + the manager to pre-fill (null = none).
   const [addOpen, setAddOpen] = useState(false)
@@ -65,6 +70,12 @@ export default function App() {
     setAddManager(managerName ?? null)
     setAddOpen(true)
   }, [])
+
+  const openProfile = useCallback((person: Person) => {
+    setSelected(null) // hand off from the edit dialog to a single profile overlay
+    setProfilePerson(person)
+  }, [])
+  const profileViewerValue = useMemo(() => ({ openProfile }), [openProfile])
 
   // Deep-link: resolve ?person once the org has loaded (using the slug captured
   // on mount, so the URL-sync effect below can't wipe it first).
@@ -147,6 +158,7 @@ export default function App() {
         {status === 'error' && <ErrorState message={error} onRetry={reload} />}
         {status === 'success' && effectiveOrg && (
           <OrgEditsProvider value={editsValue}>
+            <ProfileViewerProvider value={profileViewerValue}>
             <div className={cn('mb-5', !wide && 'mx-auto max-w-[88rem]')}>
               <Legend />
             </div>
@@ -177,6 +189,8 @@ export default function App() {
               onClose={() => setAddOpen(false)}
             />
             <HistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
+            <ProfileModal person={profilePerson} onClose={() => setProfilePerson(null)} />
+            </ProfileViewerProvider>
           </OrgEditsProvider>
         )}
       </main>

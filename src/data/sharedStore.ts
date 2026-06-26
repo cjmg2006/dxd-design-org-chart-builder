@@ -48,6 +48,23 @@ export async function saveEdits(data: OrgEdits): Promise<{ version: number; upda
   return (await res.json()) as { version: number; updatedAt: string }
 }
 
+/** Save a person's profile photo (a downscaled JPEG data URL) to its own store.
+ *  Rejects if no backend is reachable so the caller can surface a message. */
+export async function saveProfilePhoto(name: string, dataUrl: string): Promise<void> {
+  const res = await fetch('/api/profile-photo', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, dataUrl }),
+    signal: withTimeout(),
+  })
+  if (!res.ok) throw new Error(`photo PUT ${res.status}`)
+}
+
+/** The <img src> for a person's saved photo. `v` cache-busts after each upload. */
+export function profilePhotoSrc(name: string, v?: number): string {
+  return `/api/profile-photo?name=${encodeURIComponent(name)}&v=${v ?? 0}`
+}
+
 /** Read recent history entries, most-recent first. */
 export async function fetchHistory(limit = 100, signal?: AbortSignal): Promise<HistoryEntry[]> {
   const res = await fetch(`${HISTORY}?limit=${limit}`, {
