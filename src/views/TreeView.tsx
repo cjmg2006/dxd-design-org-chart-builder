@@ -17,7 +17,8 @@ import { useOrgEditsContext } from '@/data/orgEdits'
 import { isMatch, type DomainFilter, type ViewProps } from '@/lib/filter'
 import { statusShort } from '@/lib/styles'
 import { PersonCard } from '@/components/PersonCard'
-import { DomainDot, EmploymentBadge, Initials, StatusPill } from '@/components/primitives'
+import { Avatar, DomainDot, EmploymentBadge, StatusPill } from '@/components/primitives'
+import { useProfile } from '@/data/profileViewer'
 import { SpecialtyIcon } from '@/components/SpecialtyIcon'
 import { cn } from '@/lib/cn'
 import {
@@ -1170,6 +1171,7 @@ function OutlineNode({
   const [open, setOpen] = useState(true)
   const isDim = dimmed(person, query, domain, filtering)
   const count = descendantCount(org, person.name)
+  const profile = useProfile(person)
 
   // Indent by depth, capped so deep branches still fit at 360px.
   const indent = Math.min(depth, 5) * 14
@@ -1211,7 +1213,7 @@ function OutlineNode({
             }. View details.`}
             className="flex min-h-12 min-w-0 flex-1 items-center gap-2.5 py-2 pr-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
-            <Initials name={person.name} className="size-8 text-xs" />
+            <Avatar name={person.name} photo={profile?.photo} className="size-8 text-xs" />
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-1.5">
                 <span className="truncate text-sm font-semibold text-ink">{person.name}</span>

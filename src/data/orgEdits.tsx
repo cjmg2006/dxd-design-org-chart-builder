@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { AddedPerson, Domain, Org, OrgEdits } from './types'
+import type { AddedPerson, Domain, Org, OrgEdits, ProfileOverride } from './types'
 import { fetchEdits, saveEdits as saveRemote, logHistory } from './sharedStore'
 
 // Custom arrangement, keyed by person name:
@@ -24,6 +24,7 @@ const EMPTY_EDITS: OrgEdits = {
   workstreams: {},
   additions: {},
   removed: {},
+  profiles: {},
 }
 const SAVE_DEBOUNCE_MS = 600 // coalesce rapid edits (e.g. a drag) into one save
 const SAVE_RETRY_MS = 3000 // back off this long before retrying a failed save
@@ -38,6 +39,7 @@ function normalize(d: Partial<OrgEdits> | undefined | null): OrgEdits {
     workstreams: d?.workstreams ?? {},
     additions: d?.additions ?? {},
     removed: d?.removed ?? {},
+    profiles: d?.profiles ?? {},
   }
 }
 
@@ -81,7 +83,10 @@ export interface OrgEditsApi {
   /** Remove a person (added → dropped; sheet → hidden). Optionally promote their
    *  reports onto a new manager so the tree stays connected. */
   removePerson: (name: string, promote?: { toManager: string; reportNames: string[] }) => void
-  /** Clear every override (positions, managers, domains, products, additions). */
+  /** Set (or clear, with null) a person's in-app profile edit. */
+  setProfile: (name: string, override: ProfileOverride | null) => void
+  /** Clear structural overrides (positions, managers, domains, products,
+   *  additions, removals). Profile edits are kept — they're data, not layout. */
   reset: () => void
   hasEdits: boolean
 }
@@ -260,9 +265,21 @@ export function useOrgEdits(): OrgEditsApi {
     },
     [note],
   )
+  const setProfile = useCallback(
+    (name: string, override: ProfileOverride | null) => {
+      localChange.current = true
+      setEdits((e) => ({
+        ...e,
+        profiles: override === null ? without(e.profiles, name) : { ...e.profiles, [name]: override },
+      }))
+      note('profile', override === null ? `reset ${name}'s profile` : `updated ${name}'s profile`)
+    },
+    [note],
+  )
   const reset = useCallback(() => {
     localChange.current = true
-    setEdits(EMPTY_EDITS)
+    // Keep profile edits (uploaded photos + written bios) — only clear structure.
+    setEdits((e) => ({ ...EMPTY_EDITS, profiles: e.profiles }))
     note('reset', 'reset all edits')
   }, [note])
 
@@ -277,8 +294,8 @@ export function useOrgEdits(): OrgEditsApi {
   // Stable reference between edits — the callbacks never change, so consumers
   // (the edit canvas, the detail dialog) only re-render when the edits change.
   return useMemo(
-    () => ({ edits, commitNode, reparent, setDomain, setWorkstream, addPerson, removePerson, reset, hasEdits }),
-    [edits, commitNode, reparent, setDomain, setWorkstream, addPerson, removePerson, reset, hasEdits],
+    () => ({ edits, commitNode, reparent, setDomain, setWorkstream, addPerson, removePerson, setProfile, reset, hasEdits }),
+    [edits, commitNode, reparent, setDomain, setWorkstream, addPerson, removePerson, setProfile, reset, hasEdits],
   )
 }
 

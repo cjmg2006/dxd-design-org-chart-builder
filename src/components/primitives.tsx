@@ -29,6 +29,32 @@ export function Initials({ name, className }: { name: string; className?: string
   )
 }
 
+/** A person's avatar: their profile photo when we have one, falling back to the
+ *  initials badge. Photos are baked-in local assets under /profiles (see
+ *  data/profiles.ts). The `size-*` (and any ring) come from `className`. */
+export function Avatar({
+  name,
+  photo,
+  className,
+}: {
+  name: string
+  photo?: string
+  className?: string
+}) {
+  if (photo) {
+    return (
+      <img
+        src={photo}
+        alt=""
+        aria-hidden
+        loading="lazy"
+        className={cn('shrink-0 rounded-pill bg-surface-2 object-cover', className)}
+      />
+    )
+  }
+  return <Initials name={name} className={className} />
+}
+
 /** A small coloured dot marking a domain (decorative; paired with a text label). */
 export function DomainDot({ domain, className }: { domain: Domain; className?: string }) {
   return (

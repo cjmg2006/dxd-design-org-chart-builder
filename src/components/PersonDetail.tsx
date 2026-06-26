@@ -4,9 +4,10 @@ import type { Domain, Org, Person } from '@/data/types'
 import { managerCandidates, managerOf, peersOf, reportsOf, menteesOf } from '@/data/org'
 import { useOrgEditsContext } from '@/data/orgEdits'
 import { DOMAIN_LABEL, DOMAIN_ORDER, WORKSTREAMS_BY_DOMAIN } from '@/data/constants'
+import { useProfile, useProfileViewer } from '@/data/profileViewer'
 import { cn } from '@/lib/cn'
 import { SpecialtyIcon } from './SpecialtyIcon'
-import { DomainDot, Initials, StatusPill } from './primitives'
+import { Avatar, DomainDot, StatusPill } from './primitives'
 import { EMPLOYMENT_LABEL } from '@/lib/styles'
 
 interface PersonDetailProps {
@@ -72,10 +73,12 @@ function DetailBody({
   onRemoved: () => void
 }) {
   const { baseOrg, reparent, setDomain, setWorkstream, removePerson } = useOrgEditsContext()
+  const { openProfile } = useProfileViewer()
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   // Always render from the live record (overrides applied), falling back to the
   // snapshot we were handed if the person isn't in the derived maps.
   const live = liveOf(org, person.name) ?? person
+  const profile = useProfile(live)
   const isRoot = live.name === org.root.name
 
   const manager = managerOf(org, live)
@@ -110,7 +113,7 @@ function DetailBody({
   return (
     <div>
       <div className="flex items-start gap-3">
-        <Initials name={live.name} className="size-12 text-base" />
+        <Avatar name={live.name} photo={profile?.photo} className="size-12 text-base" />
         <div className="min-w-0 flex-1">
           <Dialog.Title className="font-display text-xl text-ink">{live.name}</Dialog.Title>
           <Dialog.Description className="mt-0.5 flex items-center gap-1.5 text-sm text-ink-secondary">
@@ -139,6 +142,18 @@ function DetailBody({
           <StatusPill status={live.status} month={live.statusMonth} />
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={() => openProfile(live)}
+        className="mt-4 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-chip bg-primary px-3 text-sm font-semibold text-primary-fg hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      >
+        <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.6}>
+          <circle cx="8" cy="5" r="2.6" />
+          <path d="M3 13.2c0-2.4 2.2-3.7 5-3.7s5 1.3 5 3.7" strokeLinecap="round" />
+        </svg>
+        {profile ? 'View full profile' : 'Add a profile'}
+      </button>
 
       {isRoot ? (
         // The synthetic head-of-design sits at the top of the chart and isn't

@@ -5,7 +5,8 @@ import { managerOf, menteesOf, peersOf, reportsOf } from '@/data/org'
 import { isMatch, type ViewProps } from '@/lib/filter'
 import { DOMAIN_LABEL, DOMAIN_ORDER } from '@/data/constants'
 import { DOMAIN_STYLE, EMPLOYMENT_LABEL } from '@/lib/styles'
-import { DomainDot, Initials, StatusPill, WsChip } from '@/components/primitives'
+import { Avatar, DomainDot, StatusPill, WsChip } from '@/components/primitives'
+import { useProfile, useProfileViewer } from '@/data/profileViewer'
 import { SpecialtyIcon } from '@/components/SpecialtyIcon'
 import { cn } from '@/lib/cn'
 
@@ -166,6 +167,7 @@ function PersonRow({
   active: boolean
   onPick: (p: Person) => void
 }) {
+  const profile = useProfile(person)
   return (
     <button
       type="button"
@@ -179,7 +181,7 @@ function PersonRow({
           : 'text-ink hover:bg-surface-2',
       )}
     >
-      <Initials name={person.name} className="size-8 text-xs" />
+      <Avatar name={person.name} photo={profile?.photo} className="size-8 text-xs" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold">{person.name}</span>
         {person.specialty && person.specialty !== '-' && (
@@ -212,13 +214,15 @@ function FocusPanel({
   const reports = reportsOf(org, person.name)
   const mentees = menteesOf(org, person.name)
   const peers = peersOf(org, person)
+  const profile = useProfile(person)
+  const { openProfile } = useProfileViewer()
 
   const hasSpecialty = person.specialty && person.specialty !== '-'
 
   return (
     <div className="rounded-card border border-border bg-surface p-5 sm:p-6">
       <div className="flex items-start gap-3 sm:gap-4">
-        <Initials name={person.name} className="size-14 text-lg sm:size-16 sm:text-xl" />
+        <Avatar name={person.name} photo={profile?.photo} className="size-14 text-lg sm:size-16 sm:text-xl" />
         <div className="min-w-0 flex-1">
           <h2 className="font-display text-2xl text-ink">{person.name}</h2>
           <p className="mt-1 flex items-center gap-1.5 text-sm text-ink-secondary">
@@ -239,6 +243,18 @@ function FocusPanel({
           <StatusPill status={person.status} month={person.statusMonth} />
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={() => openProfile(person)}
+        className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-chip border border-border bg-surface px-3 text-sm font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      >
+        <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.6}>
+          <circle cx="8" cy="5" r="2.6" />
+          <path d="M3 13.2c0-2.4 2.2-3.7 5-3.7s5 1.3 5 3.7" strokeLinecap="round" />
+        </svg>
+        {profile ? 'View full profile' : 'Add a profile'}
+      </button>
 
       <dl className="mt-5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2.5 border-t border-border pt-5 text-sm">
         <Fact label="Domain">

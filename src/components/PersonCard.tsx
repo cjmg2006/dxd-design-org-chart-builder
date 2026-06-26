@@ -1,7 +1,8 @@
 import type { Person } from '@/data/types'
 import { cn } from '@/lib/cn'
+import { useProfile, useProfileViewer } from '@/data/profileViewer'
 import { SpecialtyIcon } from './SpecialtyIcon'
-import { DomainDot, EmploymentBadge, Initials, StatusPill, WsChip } from './primitives'
+import { Avatar, DomainDot, EmploymentBadge, StatusPill, WsChip } from './primitives'
 import { statusShort } from '@/lib/styles'
 
 interface PersonCardProps {
@@ -26,6 +27,8 @@ export function PersonCard({
 }: PersonCardProps) {
   const isGhost = !!ghostFrom
   const isOpen = person.isOpenRole
+  const profile = useProfile(person)
+  const { openProfile } = useProfileViewer()
 
   const ariaLabel = isGhost
     ? `${person.name}, transferring in from ${ghostFrom}. View details.`
@@ -34,20 +37,26 @@ export function PersonCard({
       }. View details.`
 
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(person)}
-      aria-label={ariaLabel}
+    // A card with two actions: the whole card opens details (stretched overlay
+    // button), while the avatar opens the person's full profile. They're sibling
+    // buttons (the avatar raised above the overlay) to avoid nesting buttons.
+    <div
       className={cn(
         'group relative flex w-full flex-col gap-2 rounded-card border bg-surface p-3 text-left',
         'transition-shadow duration-150 hover:shadow-md',
-        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary',
         isOpen || isGhost ? 'border-dashed' : 'border-border hover:border-border-strong',
         isGhost && 'border-transfer-border bg-transfer-soft',
         isOpen && 'border-border-strong bg-surface-2/40',
         className,
       )}
     >
+      <button
+        type="button"
+        onClick={() => onSelect(person)}
+        aria-label={ariaLabel}
+        className="absolute inset-0 rounded-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      />
+
       {/* Status pill — only when present; the single loudest thing on the card */}
       {person.status && !isGhost && (
         <StatusPill status={person.status} month={person.statusMonth} />
@@ -59,8 +68,15 @@ export function PersonCard({
         </span>
       )}
 
-      <div className="flex items-start gap-2.5">
-        <Initials name={person.name} className="size-8 text-xs" />
+      <div className="flex items-center gap-2.5">
+        <button
+          type="button"
+          onClick={() => openProfile(person)}
+          aria-label={`View ${person.name}'s profile`}
+          className="relative z-10 shrink-0 rounded-pill transition-transform duration-150 hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <Avatar name={person.name} photo={profile?.photo} className="size-11 text-sm" />
+        </button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-ink">{person.name}</div>
           {person.specialty && person.specialty !== '-' ? (
@@ -101,6 +117,6 @@ export function PersonCard({
           <EmploymentBadge type={person.employment} />
         </span>
       </div>
-    </button>
+    </div>
   )
 }

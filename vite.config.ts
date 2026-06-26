@@ -9,20 +9,24 @@ import { fileURLToPath, URL } from 'node:url'
 // plugin serves the same routes from a local JSON file. That keeps the shared
 // edits flow fully exercisable locally — two browser tabs on localhost share one
 // store and see each other's edits — without provisioning a backend.
-const EMPTY = { positions: {}, managers: {}, domains: {}, workstreams: {}, additions: {}, removed: {} }
+const EMPTY = { positions: {}, managers: {}, domains: {}, workstreams: {}, additions: {}, removed: {}, profiles: {} }
+const DATAURL_RE = /^data:(image\/[\w.+-]+);base64,([A-Za-z0-9+/=]+)$/
 
 interface DevStore {
   edits: { version: number; data: unknown; updatedAt: string | null }
   history: { ts: string; action: string; summary: string }[]
+  /** Per-person profile photos (data URLs), mirroring api/profile-photo.ts. */
+  photos: Record<string, string>
 }
 
 function devApi(): Plugin {
   const FILE = fileURLToPath(new URL('./.dev-store.json', import.meta.url))
   const read = (): DevStore => {
     try {
-      return JSON.parse(fs.readFileSync(FILE, 'utf8')) as DevStore
+      const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8')) as Partial<DevStore>
+      return { edits: { version: 0, data: EMPTY, updatedAt: null }, history: [], photos: {}, ...parsed }
     } catch {
-      return { edits: { version: 0, data: EMPTY, updatedAt: null }, history: [] }
+      return { edits: { version: 0, data: EMPTY, updatedAt: null }, history: [], photos: {} }
     }
   }
   const write = (s: DevStore) => {
@@ -47,7 +51,12 @@ function devApi(): Plugin {
 
   const middleware: Connect.NextHandleFunction = async (req, res, next) => {
     const url = req.url || ''
-    if (!url.startsWith('/api/edits') && !url.startsWith('/api/history')) return next()
+    if (
+      !url.startsWith('/api/edits') &&
+      !url.startsWith('/api/history') &&
+      !url.startsWith('/api/profile-photo')
+    )
+      return next()
     const send = (code: number, body: unknown) => {
       res.statusCode = code
       res.setHeader('Content-Type', 'application/json')
@@ -55,6 +64,31 @@ function devApi(): Plugin {
       res.end(JSON.stringify(body))
     }
     const store = read()
+
+    // Per-person profile photos (mirrors api/profile-photo.ts): GET serves the
+    // decoded image bytes; PUT stores the data URL.
+    if (url.startsWith('/api/profile-photo')) {
+      const name = new URL(url, 'http://x').searchParams.get('name')?.trim()
+      if (req.method === 'GET') {
+        const raw = name ? store.photos[name] : undefined
+        const m = raw ? DATAURL_RE.exec(raw) : null
+        if (!m) return send(404, { error: 'No photo' })
+        res.statusCode = 200
+        res.setHeader('Content-Type', m[1])
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+        return res.end(Buffer.from(m[2], 'base64'))
+      }
+      if (req.method === 'PUT') {
+        const body = await readBody(req)
+        const who = String(body.name || '').trim()
+        const dataUrl = typeof body.dataUrl === 'string' ? body.dataUrl : ''
+        if (!who || !DATAURL_RE.test(dataUrl)) return send(400, { error: 'Missing name or invalid dataUrl' })
+        store.photos = { ...store.photos, [who]: dataUrl }
+        write(store)
+        return send(200, { ok: true })
+      }
+      return send(405, { error: 'Method not allowed' })
+    }
 
     if (url.startsWith('/api/edits')) {
       if (req.method === 'GET') return send(200, store.edits)

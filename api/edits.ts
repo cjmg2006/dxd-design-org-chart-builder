@@ -11,9 +11,11 @@
 
 const KEY = 'orgchart:edits'
 const VERSION_KEY = 'orgchart:version' // atomic INCR counter so versions stay strictly monotonic
-const MAX_BYTES = 256_000 // reject oversized docs on this public, unauthenticated write
-const EDIT_MAPS = ['positions', 'managers', 'domains', 'workstreams', 'additions', 'removed']
-const EMPTY = { positions: {}, managers: {}, domains: {}, workstreams: {}, additions: {}, removed: {} }
+// Headroom for ~30 people's editable profile text (photos live in their own
+// per-person store, not here), while still bounding this public, unauth write.
+const MAX_BYTES = 1_000_000
+const EDIT_MAPS = ['positions', 'managers', 'domains', 'workstreams', 'additions', 'removed', 'profiles']
+const EMPTY = { positions: {}, managers: {}, domains: {}, workstreams: {}, additions: {}, removed: {}, profiles: {} }
 
 const isPlainObject = (v: unknown): boolean =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
