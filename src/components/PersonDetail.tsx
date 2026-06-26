@@ -34,7 +34,7 @@ export function PersonDetail({ org, person, onClose, onNavigate, onAddReport }: 
           className={cn(
             'fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2',
             'max-h-[calc(100vh-2rem)] overflow-y-auto rounded-card border border-border bg-surface p-5 shadow-xl',
-            'transition-all duration-150 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
+            'transition-[opacity,transform] duration-150 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
           )}
         >
           {person && (
@@ -146,7 +146,7 @@ function DetailBody({
       <button
         type="button"
         onClick={() => openProfile(live)}
-        className="mt-4 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-chip bg-primary px-3 text-sm font-semibold text-primary-fg hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-chip bg-primary px-3 text-sm font-semibold text-primary-fg hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-9"
       >
         <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.6}>
           <circle cx="8" cy="5" r="2.6" />

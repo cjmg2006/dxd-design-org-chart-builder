@@ -247,7 +247,7 @@ function FocusPanel({
       <button
         type="button"
         onClick={() => openProfile(person)}
-        className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-chip border border-border bg-surface px-3 text-sm font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        className="mt-4 inline-flex min-h-11 items-center gap-1.5 rounded-chip border border-border bg-surface px-3 text-sm font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-9"
       >
         <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.6}>
           <circle cx="8" cy="5" r="2.6" />
