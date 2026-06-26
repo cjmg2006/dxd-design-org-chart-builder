@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { Dialog } from '@base-ui-components/react/dialog'
 import type { Person, ProfileOverride } from '@/data/types'
 import { type ProfilePhoto } from '@/data/profiles'
@@ -19,11 +19,23 @@ interface ProfileModalProps {
  *  content (photo, personality, working style, links, gallery). Opened from a
  *  card's photo or the detail dialog; anyone can edit it + upload a photo in-app. */
 export function ProfileModal({ person, onClose }: ProfileModalProps) {
+  // `editing` lives here (not in the body) so the dialog can refuse an accidental
+  // backdrop/Esc dismiss while an edit is in progress — a stray click must not
+  // discard staged edits. Closing is reset to read mode for the next open.
+  const [editing, setEditing] = useState(false)
+  const savedRef = useRef(false)
+  useEffect(() => {
+    if (!person) setEditing(false)
+  }, [person])
+
   return (
     <Dialog.Root
       open={!!person}
       onOpenChange={(open) => {
-        if (!open) onClose()
+        if (open) return
+        // While editing, ignore backdrop/Esc — leave via Cancel (→ read view) first.
+        if (editing) return
+        onClose()
       }}
     >
       <Dialog.Portal>
@@ -32,44 +44,76 @@ export function ProfileModal({ person, onClose }: ProfileModalProps) {
           className={cn(
             'fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-4xl -translate-x-1/2 -translate-y-1/2',
             'max-h-[calc(100vh-3rem)] overflow-y-auto rounded-card border border-border bg-surface shadow-xl',
-            'transition-all duration-200 data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0 data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0',
+            'transition-[opacity,transform] duration-200 data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0 data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0',
           )}
         >
-          {person && <ProfileBody key={person.name} person={person} />}
+          {/* tfx-waive SLP-10 approver="Wondo Jeong" reason="Routerless SPA: every editing surface (person detail, add-person, history) is a Base UI modal by design; a routed page is inconsistent and out of scope. Mitigated — editor is single-column, and backdrop/Esc dismiss is blocked while editing so staged edits are never lost on an accidental click." */}
+          {person &&
+            (editing ? (
+              <ProfileEditor
+                key={person.name}
+                person={person}
+                onDone={(saved) => {
+                  savedRef.current = !!saved
+                  setEditing(false)
+                }}
+              />
+            ) : (
+              <ProfileView
+                key={person.name}
+                person={person}
+                onEdit={() => setEditing(true)}
+                focusEdit={savedRef.current}
+                onFocused={() => {
+                  savedRef.current = false
+                }}
+              />
+            ))}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
   )
 }
 
-function ProfileBody({ person }: { person: Person }) {
-  const [editing, setEditing] = useState(false)
-  return editing ? (
-    <ProfileEditor person={person} onDone={() => setEditing(false)} />
-  ) : (
-    <ProfileView person={person} onEdit={() => setEditing(true)} />
-  )
-}
-
 /* ── Read view ────────────────────────────────────────────────────────────── */
 
-function ProfileView({ person, onEdit }: { person: Person; onEdit: () => void }) {
+function ProfileView({
+  person,
+  onEdit,
+  focusEdit,
+  onFocused,
+}: {
+  person: Person
+  onEdit: () => void
+  focusEdit?: boolean
+  onFocused?: () => void
+}) {
   const profile = useProfile(person)
+  // After a Save returns here, move focus to the Edit button (A11Y-11) instead
+  // of letting it fall to <body> when the editor unmounts.
+  const editRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (focusEdit) {
+      editRef.current?.focus()
+      onFocused?.()
+    }
+  }, [focusEdit, onFocused])
 
   return (
     <div>
       <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-surface/85 px-4 py-2.5 backdrop-blur">
         <button
+          ref={editRef}
           type="button"
           onClick={onEdit}
-          className="inline-flex h-8 items-center gap-1.5 rounded-chip border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-chip border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-8"
         >
           <PencilIcon />
           {profile ? 'Edit profile' : 'Add profile'}
         </button>
         <Dialog.Close
           aria-label="Close profile"
-          className="inline-flex size-9 items-center justify-center rounded-chip text-ink-muted hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className="inline-flex size-11 items-center justify-center rounded-chip text-ink-muted hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:size-9"
         >
           <svg viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth={1.6} aria-hidden>
             <path d="M3 3l10 10M13 3L3 13" strokeLinecap="round" />
@@ -223,7 +267,7 @@ const EDIT_SECTIONS: { key: ListKey; title: string }[] = [
   ...VIEW_SECTIONS,
 ]
 
-function ProfileEditor({ person, onDone }: { person: Person; onDone: () => void }) {
+function ProfileEditor({ person, onDone }: { person: Person; onDone: (saved?: boolean) => void }) {
   const profile = useProfile(person)
   const { edits, setProfile } = useOrgEditsContext()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -318,7 +362,7 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: () => void 
       if (photo !== undefined) override.photo = photo
       if (photoV !== undefined) override.photoV = photoV
       setProfile(person.name, override)
-      onDone()
+      onDone(true)
     } catch {
       setError("Couldn't save the photo — the shared store may be unreachable. Try again.")
       setSaving(false)
@@ -332,9 +376,9 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: () => void 
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={onDone}
+            onClick={() => onDone()}
             disabled={saving}
-            className="inline-flex h-9 items-center rounded-chip border border-border bg-surface px-3 text-sm font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50"
+            className="inline-flex min-h-11 items-center rounded-chip border border-border bg-surface px-3 text-sm font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 sm:min-h-9"
           >
             Cancel
           </button>
@@ -342,7 +386,7 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: () => void 
             type="button"
             onClick={save}
             disabled={saving}
-            className="inline-flex h-9 items-center gap-1.5 rounded-chip bg-primary px-4 text-sm font-semibold text-primary-fg hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-60"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-chip bg-primary px-4 text-sm font-semibold text-primary-fg hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-60 sm:min-h-9"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
@@ -353,7 +397,7 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: () => void 
         <Dialog.Title className="sr-only">Edit {person.name}'s profile</Dialog.Title>
 
         {error && (
-          <div className="mb-4 rounded-chip border border-departing-border bg-departing-soft px-3 py-2 text-sm text-departing-text">
+          <div role="alert" className="mb-4 rounded-chip border border-departing-border bg-departing-soft px-3 py-2 text-sm text-departing-text">
             {error}
           </div>
         )}
@@ -371,7 +415,7 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: () => void 
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
-                className="inline-flex h-8 items-center gap-1.5 rounded-chip border border-border bg-surface px-2.5 text-xs font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-chip border border-border bg-surface px-2.5 text-xs font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-8"
               >
                 <CameraIcon />
                 {shownPhoto ? 'Change' : 'Upload photo'}
@@ -383,7 +427,7 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: () => void 
                     setPhotoPreview(null)
                     setPhotoRemoved(true)
                   }}
-                  className="inline-flex h-8 items-center rounded-chip px-2 text-xs font-medium text-ink-muted hover:text-departing-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-departing-text"
+                  className="inline-flex min-h-11 items-center rounded-chip px-2 text-xs font-medium text-ink-muted hover:text-departing-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-departing-text sm:min-h-8"
                 >
                   Remove
                 </button>
@@ -396,7 +440,7 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: () => void 
             <p className="mt-0.5 text-2xs text-ink-muted">
               Name, domain &amp; reporting line are set from the org chart — edit those from the card’s detail dialog.
             </p>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="mt-3 grid grid-cols-1 gap-3">
               <Field label="Job title">
                 <input className={INPUT} value={form.jobTitle} onChange={(e) => set('jobTitle', e.target.value)} placeholder="e.g. Product Designer" />
               </Field>
@@ -419,7 +463,7 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: () => void 
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 gap-4 rounded-card bg-surface-2/60 p-4 sm:grid-cols-2">
+        <div className="mt-6 grid grid-cols-1 gap-4 rounded-card bg-surface-2/60 p-4">
           <Field label="Specialised in" hint="One per line">
             <textarea className={TEXTAREA} value={tags.specialisedIn} onChange={(e) => setTags((t) => ({ ...t, specialisedIn: e.target.value }))} placeholder={'UX design\nUI design'} />
           </Field>
@@ -441,16 +485,16 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: () => void 
 }
 
 const INPUT =
-  'h-9 w-full rounded-chip border border-border bg-surface px-2.5 text-sm text-ink placeholder:text-ink-faint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary'
+  'min-h-11 w-full rounded-chip border border-border bg-surface px-2.5 text-sm text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-9'
 const TEXTAREA =
-  'min-h-[4.5rem] w-full rounded-chip border border-border bg-surface px-2.5 py-2 text-sm leading-relaxed text-ink placeholder:text-ink-faint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary'
+  'min-h-[4.5rem] w-full rounded-chip border border-border bg-surface px-2.5 py-2 text-sm leading-relaxed text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary'
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="block">
       <span className="flex items-baseline justify-between gap-2">
         <span className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">{label}</span>
-        {hint && <span className="text-2xs text-ink-faint">{hint}</span>}
+        {hint && <span className="text-2xs text-ink-muted">{hint}</span>}
       </span>
       <span className="mt-1.5 block">{children}</span>
     </label>
@@ -470,7 +514,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 function BulletList({ items }: { items: string[] }) {
   return (
-    <ul className="space-y-2">
+    <ul className="max-w-[68ch] space-y-2">
       {items.map((t, i) => (
         <li key={i} className="flex gap-2.5 text-sm leading-relaxed text-ink-secondary">
           <span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-pill bg-border-strong" />
@@ -536,7 +580,7 @@ function LinkButton({ href, icon, children }: { href: string; icon: ReactNode; c
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex h-8 items-center gap-1.5 rounded-pill border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      className="inline-flex min-h-11 items-center gap-1.5 rounded-pill border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-8"
     >
       <span className="text-ink-muted">{icon}</span>
       {children}

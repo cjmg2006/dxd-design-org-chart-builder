@@ -41,7 +41,7 @@ export function HistoryDialog({ open, onClose }: HistoryDialogProps) {
           className={cn(
             'fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col',
             'rounded-card border border-border bg-surface shadow-xl',
-            'transition-all duration-150 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
+            'transition-[opacity,transform] duration-150 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
           )}
         >
           <div className="flex items-start justify-between gap-3 border-b border-border p-5 pb-3">

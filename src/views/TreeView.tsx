@@ -914,7 +914,7 @@ function DraggableNode({
             onAddReport()
           }}
           aria-label={`Add a report to ${node.person.name}`}
-          className="absolute -right-2 -top-2 z-10 inline-flex size-6 items-center justify-center rounded-pill border border-border bg-surface text-ink-secondary opacity-0 shadow-sm transition-all duration-150 hover:border-primary hover:text-primary group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className="absolute -right-2 -top-2 z-10 inline-flex size-6 items-center justify-center rounded-pill border border-border bg-surface text-ink-secondary opacity-0 shadow-sm transition-[opacity,color,border-color] duration-150 hover:border-primary hover:text-primary group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         >
           <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.8}>
             <path d="M8 3v10M3 8h10" strokeLinecap="round" />
