@@ -59,11 +59,14 @@ function deriveOrg(people: Person[], openRoles: Person[], root: Person): Org {
   byName.set(root.name, root)
   const bySlug = new Map<string, Person>(people.map((p) => [p.slug, p]))
 
-  // Leadership = everyone reporting directly to the root, managers first.
+  // Leadership = root-reports who actually manage a team (≥1 report), biggest
+  // first. Someone parked directly under the head while awaiting a permanent
+  // manager — no reports of their own — is NOT leadership; they surface under
+  // their domain/workstream instead (e.g. Reina/Tasha → Students).
   const rootReports = childMap.get(root.name)?.reports ?? []
-  const leadership = [...rootReports].sort(
-    (a, b) => descendantCountIn(childMap, b.name) - descendantCountIn(childMap, a.name),
-  )
+  const leadership = rootReports
+    .filter((p) => (childMap.get(p.name)?.reports.length ?? 0) > 0)
+    .sort((a, b) => descendantCountIn(childMap, b.name) - descendantCountIn(childMap, a.name))
 
   const domains = groupByDomainAndWS(people)
 
