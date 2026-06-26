@@ -333,7 +333,7 @@ function FieldRow({
   return (
     <>
       <dt className="text-sm text-ink-muted">{label}</dt>
-      <dd>
+      <dd className="min-w-0">
         <div
           className={cn(
             'flex min-h-11 items-center gap-1.5 rounded-chip border bg-surface px-2.5 transition-colors duration-150 sm:min-h-9',
@@ -365,7 +365,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
       <dt className="text-sm text-ink-muted">{label}</dt>
-      <dd className="text-sm text-ink">{children}</dd>
+      <dd className="min-w-0 truncate text-sm text-ink">{children}</dd>
     </>
   )
 }
