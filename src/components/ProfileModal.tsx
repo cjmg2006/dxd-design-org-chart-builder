@@ -493,7 +493,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return (
     <label className="block">
       <span className="flex items-baseline justify-between gap-2">
-        <span className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">{label}</span>
+        <span className="text-2xs font-semibold text-ink-muted">{label}</span>
         {hint && <span className="text-2xs text-ink-muted">{hint}</span>}
       </span>
       <span className="mt-1.5 block">{children}</span>
@@ -506,7 +506,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
-      <h3 className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">{title}</h3>
+      <h3 className="text-2xs font-semibold text-ink-muted">{title}</h3>
       <div className="mt-2.5">{children}</div>
     </section>
   )
@@ -548,7 +548,7 @@ function Chips({ items, tone = 'neutral' }: { items: string[]; tone?: 'neutral' 
 function TagRow({ label, items, tone }: { label: string; items: string[]; tone: 'neutral' | 'primary' }) {
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:gap-3">
-      <span className="shrink-0 pt-0.5 text-2xs font-semibold uppercase tracking-wide text-ink-muted sm:w-28">
+      <span className="shrink-0 pt-0.5 text-2xs font-semibold text-ink-muted sm:w-28">
         {label}
       </span>
       <Chips items={items} tone={tone} />

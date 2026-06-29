@@ -12,22 +12,27 @@ const SPECIALTIES: { kind: SpecialtyKind; label: string }[] = [
   { kind: 'manager', label: 'Manager / Lead' },
 ]
 
-export function Legend() {
+export function Legend({ leading }: { leading?: React.ReactNode }) {
   return (
     <Collapsible.Root defaultOpen={false}>
-      <Collapsible.Trigger className="group inline-flex min-h-11 items-center gap-1.5 rounded-chip py-1 text-xs font-medium text-ink-secondary hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-8">
-        <svg
-          aria-hidden
-          viewBox="0 0 16 16"
-          className="size-3.5 transition-transform duration-150 group-data-[panel-open]:rotate-90"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.6}
-        >
-          <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        What the colours &amp; icons mean
-      </Collapsible.Trigger>
+      {/* `leading` (the active-view descriptor) shares the trigger's row, so the
+          panel always opens full-width *below* and the trigger never shifts. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        {leading}
+        <Collapsible.Trigger className="group inline-flex min-h-11 items-center gap-1.5 rounded-chip py-1 text-xs font-medium text-ink-secondary hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-8">
+          <svg
+            aria-hidden
+            viewBox="0 0 16 16"
+            className="size-3.5 transition-transform duration-150 group-data-[panel-open]:rotate-90"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.6}
+          >
+            <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          What the colours &amp; icons mean
+        </Collapsible.Trigger>
+      </div>
       <Collapsible.Panel className="overflow-hidden">
         <div className="mt-3 grid gap-4 rounded-card border border-border bg-surface p-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
           <LegendBlock title="Domain">
@@ -81,7 +86,7 @@ export function Legend() {
 function LegendBlock({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="mb-2 text-2xs font-semibold uppercase tracking-wide text-ink-muted">{title}</h3>
+      <h3 className="mb-2 text-2xs font-semibold text-ink-muted">{title}</h3>
       {children}
     </div>
   )

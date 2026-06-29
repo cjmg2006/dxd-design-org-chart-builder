@@ -381,7 +381,7 @@ function RelatedGroup({
 }) {
   return (
     <div className="mt-4">
-      <h3 className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">{label}</h3>
+      <h3 className="text-2xs font-semibold text-ink-muted">{label}</h3>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         {people.map((p) => (
           <button

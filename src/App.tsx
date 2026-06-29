@@ -18,10 +18,12 @@ import { DirectoryView } from './views/DirectoryView'
 import { TreeView } from './views/TreeView'
 import { ExplorerView } from './views/ExplorerView'
 
+// "Org Chart" is the umbrella (the page/app title) — all three tabs below are the
+// same org, just organised differently. Each label names *how* it groups people.
 // Internal ids are kept stable (they appear in shareable ?view= links and match
-// the *View component names); only the labels + order are the user-facing IA:
-//   tree      → "Org Chart"  the drawn reporting hierarchy (the main view)
-//   directory → "Teams"      people grouped by domain → workstream
+// the *View component names), so the id↔label mapping is intentionally crossed:
+//   tree      → "Hierarchy"  the reporting tree — who reports to whom
+//   directory → "Domains"    people grouped by domain → workstream
 //   explorer  → "Directory"  searchable list + focus pane (person lookup)
 type ViewId = 'tree' | 'directory' | 'explorer'
 
@@ -32,9 +34,9 @@ const VIEWS: Record<ViewId, (props: ViewProps) => ReactNode> = {
 }
 
 const VIEW_OPTIONS: SegOption<ViewId>[] = [
-  { value: 'tree', label: 'Org Chart', icon: <TreeIcon /> },
-  { value: 'directory', label: 'Teams', icon: <GridIcon /> },
-  { value: 'explorer', label: 'Directory', icon: <ListIcon /> },
+  { value: 'tree', label: 'Hierarchy', icon: <TreeIcon />, description: 'who reports to whom' },
+  { value: 'directory', label: 'Domains', icon: <GridIcon />, description: 'grouped by domain & workstream' },
+  { value: 'explorer', label: 'Directory', icon: <ListIcon />, description: 'searchable list of everyone' },
 ]
 
 export default function App() {
@@ -109,7 +111,8 @@ export default function App() {
   )
 
   const ViewComponent = VIEWS[view]
-  // The Org Chart is a wide canvas — let it use the full page width. The other
+  const activeView = VIEW_OPTIONS.find((o) => o.value === view) ?? VIEW_OPTIONS[0]
+  // The Hierarchy is a wide canvas — let it use the full page width. The other
   // views read best in a column, so they (and the shared legend) keep the 88rem cap.
   const wide = view === 'tree'
 
@@ -143,7 +146,7 @@ export default function App() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end">
               <SearchBox value={query} onChange={setQuery} resultCount={resultCount} total={org?.people.length ?? 0} />
               <div className="shrink-0">
-                <span className="block text-2xs font-semibold uppercase tracking-wide text-ink-muted">View</span>
+                <span className="block text-2xs font-semibold text-ink-muted">View</span>
                 <div className="mt-1">
                   <Segmented value={view} onChange={setView} options={VIEW_OPTIONS} ariaLabel="Choose a layout" />
                 </div>
@@ -160,7 +163,16 @@ export default function App() {
           <OrgEditsProvider value={editsValue}>
             <ProfileViewerProvider value={profileViewerValue}>
             <div className={cn('mb-5', !wide && 'mx-auto max-w-[88rem]')}>
-              <Legend />
+              <Legend
+                leading={
+                  <p className="text-xs text-ink-secondary" aria-live="polite">
+                    <span className="font-medium text-ink">{activeView.label}</span>
+                    {activeView.description && (
+                      <span className="text-ink-muted"> — {activeView.description}</span>
+                    )}
+                  </p>
+                }
+              />
             </div>
             <div className={cn(!wide && 'mx-auto max-w-[88rem]')}>
               <ViewComponent

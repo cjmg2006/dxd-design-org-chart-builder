@@ -13,7 +13,7 @@ export function SearchBox({ value, onChange, resultCount, total }: SearchBoxProp
       {/* Label + live result count share one row, so the box is just label +
           input — its bottom aligns cleanly with the View toggle beside it. */}
       <div className="flex items-baseline justify-between gap-2">
-        <label htmlFor="people-search" className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">
+        <label htmlFor="people-search" className="text-2xs font-semibold text-ink-muted">
           Find people
         </label>
         <span aria-live="polite" className="truncate text-2xs text-ink-muted tabular">
