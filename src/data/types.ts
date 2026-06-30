@@ -68,6 +68,10 @@ export interface Person {
   remarks: string
   /** True for open-role placeholders (names like "[Senior PD]"). */
   isOpenRole: boolean
+  /** True only for the synthetic root (the incoming Head). Not part of current
+   *  headcount, so it is excluded from the leadership-view employment counts —
+   *  and its node hides the employment tag to match. */
+  isRoot?: boolean
 }
 
 export interface WorkstreamChip {

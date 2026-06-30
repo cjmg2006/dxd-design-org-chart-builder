@@ -1,6 +1,7 @@
 import type { Person } from '@/data/types'
 import { cn } from '@/lib/cn'
 import { useProfile, useProfileViewer } from '@/data/profileViewer'
+import { useLeadershipView } from '@/data/leadershipView'
 import { SpecialtyIcon } from './SpecialtyIcon'
 import { Avatar, DomainDot, EmploymentBadge, StatusPill, WsChip } from './primitives'
 import { statusShort } from '@/lib/styles'
@@ -29,6 +30,10 @@ export function PersonCard({
   const isOpen = person.isOpenRole
   const profile = useProfile(person)
   const { openProfile } = useProfileViewer()
+  // Employment tag is hidden by default; the leadership-view lens (⌘K) brings it back.
+  // The synthetic root (incoming Head) is excluded — it isn't in the team counts.
+  const { on: leadershipOn } = useLeadershipView()
+  const showEmployment = leadershipOn && !isGhost && !person.isRoot
 
   const ariaLabel = isGhost
     ? `${person.name}, transferring in from ${ghostFrom}. View details.`
@@ -105,18 +110,22 @@ export function PersonCard({
         </div>
       )}
 
-      {/* Footer: domain + employment */}
-      <div className="mt-auto flex items-center gap-2 pt-0.5">
-        {showDomain && !isGhost && (
-          <span className="inline-flex items-center gap-1 text-2xs text-ink-secondary">
-            <DomainDot domain={person.domain} />
-            {person.domain}
-          </span>
-        )}
-        <span className="ml-auto">
-          <EmploymentBadge type={person.employment} />
-        </span>
-      </div>
+      {/* Footer: domain + (in leadership view) employment */}
+      {((showDomain && !isGhost) || showEmployment) && (
+        <div className="mt-auto flex items-center gap-2 pt-0.5">
+          {showDomain && !isGhost && (
+            <span className="inline-flex items-center gap-1 text-2xs text-ink-secondary">
+              <DomainDot domain={person.domain} />
+              {person.domain}
+            </span>
+          )}
+          {showEmployment && (
+            <span className="ml-auto">
+              <EmploymentBadge type={person.employment} />
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }

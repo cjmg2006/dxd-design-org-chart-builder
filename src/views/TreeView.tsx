@@ -19,6 +19,7 @@ import { statusShort } from '@/lib/styles'
 import { PersonCard } from '@/components/PersonCard'
 import { Avatar, DomainDot, EmploymentBadge, StatusPill } from '@/components/primitives'
 import { useProfile } from '@/data/profileViewer'
+import { useLeadershipView } from '@/data/leadershipView'
 import { SpecialtyIcon } from '@/components/SpecialtyIcon'
 import { cn } from '@/lib/cn'
 import {
@@ -1172,6 +1173,7 @@ function OutlineNode({
   const isDim = dimmed(person, query, domain, filtering)
   const count = descendantCount(org, person.name)
   const profile = useProfile(person)
+  const { on: leadershipOn } = useLeadershipView()
 
   // Indent by depth, capped so deep branches still fit at 360px.
   const indent = Math.min(depth, 5) * 14
@@ -1238,7 +1240,7 @@ function OutlineNode({
             <span className="ml-auto flex shrink-0 items-center gap-2">
               {hasChildren && <span className="text-2xs text-ink-muted tabular">{count}</span>}
               {person.domain && <DomainDot domain={person.domain} className="size-2.5" />}
-              <EmploymentBadge type={person.employment} />
+              {leadershipOn && !person.isRoot && <EmploymentBadge type={person.employment} />}
             </span>
           </button>
         </div>

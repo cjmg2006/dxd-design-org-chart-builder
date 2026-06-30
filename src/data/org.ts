@@ -28,7 +28,7 @@ export function buildOrg(rawRows: RawRow[]): Org {
 
   const openRoles = normalized.filter((p) => p.isOpenRole)
   const people = normalized.filter((p) => !p.isOpenRole)
-  const root = normalizePerson(ROOT as RawRow)
+  const root: Person = { ...normalizePerson(ROOT as RawRow), isRoot: true }
 
   return deriveOrg(people, openRoles, root)
 }

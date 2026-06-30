@@ -5,8 +5,9 @@ import { managerOf, menteesOf, peersOf, reportsOf } from '@/data/org'
 import { isMatch, type ViewProps } from '@/lib/filter'
 import { DOMAIN_LABEL, DOMAIN_ORDER } from '@/data/constants'
 import { DOMAIN_STYLE, EMPLOYMENT_LABEL } from '@/lib/styles'
-import { Avatar, DomainDot, StatusPill, WsChip } from '@/components/primitives'
+import { Avatar, DomainDot, EmploymentBadge, StatusPill, WsChip } from '@/components/primitives'
 import { useProfile, useProfileViewer } from '@/data/profileViewer'
+import { useLeadershipView } from '@/data/leadershipView'
 import { SpecialtyIcon } from '@/components/SpecialtyIcon'
 import { cn } from '@/lib/cn'
 
@@ -168,6 +169,7 @@ function PersonRow({
   onPick: (p: Person) => void
 }) {
   const profile = useProfile(person)
+  const { on: leadershipOn } = useLeadershipView()
   return (
     <button
       type="button"
@@ -196,6 +198,7 @@ function PersonRow({
       ) : (
         <DomainDot domain={person.domain} />
       )}
+      {leadershipOn && !person.isRoot && <EmploymentBadge type={person.employment} />}
     </button>
   )
 }
