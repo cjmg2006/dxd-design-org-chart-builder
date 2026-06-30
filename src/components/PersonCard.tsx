@@ -1,6 +1,7 @@
 import type { Person } from '@/data/types'
 import { cn } from '@/lib/cn'
 import { useProfile, useProfileViewer } from '@/data/profileViewer'
+import { useManagerAuth } from '@/data/managerAuth'
 import { SpecialtyIcon } from './SpecialtyIcon'
 import { Avatar, DomainDot, EmploymentBadge, StatusPill, WsChip } from './primitives'
 import { statusShort } from '@/lib/styles'
@@ -29,11 +30,12 @@ export function PersonCard({
   const isOpen = person.isOpenRole
   const profile = useProfile(person)
   const { openProfile } = useProfileViewer()
+  const { isManager } = useManagerAuth()
 
   const ariaLabel = isGhost
     ? `${person.name}, transferring in from ${ghostFrom}. View details.`
     : `${person.name}${person.specialty ? `, ${person.specialty}` : ''}${
-        person.status ? `, ${statusShort(person.status)}` : ''
+        person.status && isManager ? `, ${statusShort(person.status)}` : ''
       }. View details.`
 
   return (
@@ -58,7 +60,7 @@ export function PersonCard({
       />
 
       {/* Status pill — only when present; the single loudest thing on the card */}
-      {person.status && !isGhost && (
+      {person.status && !isGhost && isManager && (
         <StatusPill status={person.status} month={person.statusMonth} destination={person.statusDestination} />
       )}
       {isGhost && (

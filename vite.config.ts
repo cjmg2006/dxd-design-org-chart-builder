@@ -1,5 +1,6 @@
 import fs from 'node:fs'
-import { defineConfig, type Connect, type Plugin, type PreviewServer, type ViteDevServer } from 'vite'
+import crypto from 'node:crypto'
+import { defineConfig, loadEnv, type Connect, type Plugin, type PreviewServer, type ViteDevServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
@@ -12,11 +13,15 @@ import { fileURLToPath, URL } from 'node:url'
 const EMPTY = { positions: {}, managers: {}, domains: {}, workstreams: {}, additions: {}, removed: {}, profiles: {} }
 const DATAURL_RE = /^data:(image\/[\w.+-]+);base64,([A-Za-z0-9+/=]+)$/
 
+const MANAGER_TOKEN_TTL_MS = 24 * 60 * 60 * 1000 // 1 day, mirrors api/manager-auth.ts
+
 interface DevStore {
   edits: { version: number; data: unknown; updatedAt: string | null }
   history: { ts: string; action: string; summary: string }[]
   /** Per-person profile photos (data URLs), mirroring api/profile-photo.ts. */
   photos: Record<string, string>
+  /** Manager-auth tokens → expiry epoch ms, mirroring api/manager-auth.ts's Redis TTL keys. */
+  managerTokens: Record<string, number>
 }
 
 function devApi(): Plugin {
@@ -24,9 +29,9 @@ function devApi(): Plugin {
   const read = (): DevStore => {
     try {
       const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8')) as Partial<DevStore>
-      return { edits: { version: 0, data: EMPTY, updatedAt: null }, history: [], photos: {}, ...parsed }
+      return { edits: { version: 0, data: EMPTY, updatedAt: null }, history: [], photos: {}, managerTokens: {}, ...parsed }
     } catch {
-      return { edits: { version: 0, data: EMPTY, updatedAt: null }, history: [], photos: {} }
+      return { edits: { version: 0, data: EMPTY, updatedAt: null }, history: [], photos: {}, managerTokens: {} }
     }
   }
   const write = (s: DevStore) => {
@@ -54,7 +59,8 @@ function devApi(): Plugin {
     if (
       !url.startsWith('/api/edits') &&
       !url.startsWith('/api/history') &&
-      !url.startsWith('/api/profile-photo')
+      !url.startsWith('/api/profile-photo') &&
+      !url.startsWith('/api/manager-auth')
     )
       return next()
     const send = (code: number, body: unknown) => {
@@ -86,6 +92,27 @@ function devApi(): Plugin {
         store.photos = { ...store.photos, [who]: dataUrl }
         write(store)
         return send(200, { ok: true })
+      }
+      return send(405, { error: 'Method not allowed' })
+    }
+
+    if (url.startsWith('/api/manager-auth')) {
+      const now = Date.now()
+      const live = Object.fromEntries(Object.entries(store.managerTokens).filter(([, exp]) => exp > now))
+      if (req.method === 'GET') {
+        const token = new URL(url, 'http://x').searchParams.get('token') || ''
+        return send(200, { ok: Boolean(token && live[token] > now) })
+      }
+      if (req.method === 'POST') {
+        const body = await readBody(req)
+        const expected = process.env.MANAGER_PASSWORD
+        if (!expected) return send(503, { error: 'Manager view isn’t available in this deployment yet' })
+        if (body.password !== expected) return send(401, { error: 'Incorrect password' })
+        const token = crypto.randomBytes(24).toString('hex')
+        live[token] = now + MANAGER_TOKEN_TTL_MS
+        store.managerTokens = live
+        write(store)
+        return send(200, { token })
       }
       return send(405, { error: 'Method not allowed' })
     }
@@ -137,16 +164,24 @@ function devApi(): Plugin {
 
 // Relative base so the static build works on GitHub Pages, an internal static
 // host, or opened from a subpath without rewriting asset URLs.
-export default defineConfig({
-  base: './',
-  plugins: [react(), tailwindcss(), devApi()],
-  resolve: {
-    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
-    // Base UI prebundling can otherwise pull a second React copy → invalid hooks.
-    dedupe: ['react', 'react-dom'],
-  },
-  optimizeDeps: {
-    include: ['react', 'react-dom', 'react/jsx-runtime'],
-  },
-  server: { port: 8731, host: true },
+export default defineConfig(({ mode }) => {
+  // Vite only auto-loads .env files into import.meta.env for client code, not
+  // into process.env for this config file — load MANAGER_PASSWORD explicitly
+  // so the dev API middleware (devApi, below) can read it like api/manager-auth.ts does in prod.
+  const env = loadEnv(mode, process.cwd(), '')
+  if (env.MANAGER_PASSWORD) process.env.MANAGER_PASSWORD = env.MANAGER_PASSWORD
+
+  return {
+    base: './',
+    plugins: [react(), tailwindcss(), devApi()],
+    resolve: {
+      alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+      // Base UI prebundling can otherwise pull a second React copy → invalid hooks.
+      dedupe: ['react', 'react-dom'],
+    },
+    optimizeDeps: {
+      include: ['react', 'react-dom', 'react/jsx-runtime'],
+    },
+    server: { port: 8731, host: true },
+  }
 })
