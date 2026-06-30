@@ -3,6 +3,7 @@ import { DOMAIN_ORDER, DOMAIN_LABEL } from '@/data/constants'
 import { DomainDot, EmploymentBadge } from './primitives'
 import { SpecialtyIcon } from './SpecialtyIcon'
 import { StatusPill } from './primitives'
+import { useManagerAuth } from '@/data/managerAuth'
 import type { SpecialtyKind } from '@/data/types'
 
 const SPECIALTIES: { kind: SpecialtyKind; label: string }[] = [
@@ -13,6 +14,7 @@ const SPECIALTIES: { kind: SpecialtyKind; label: string }[] = [
 ]
 
 export function Legend() {
+  const { isManager } = useManagerAuth()
   return (
     <Collapsible.Root defaultOpen={false}>
       <Collapsible.Trigger className="group inline-flex min-h-11 items-center gap-1.5 rounded-chip py-1 text-xs font-medium text-ink-secondary hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-8">
@@ -41,14 +43,16 @@ export function Legend() {
             </ul>
           </LegendBlock>
 
-          <LegendBlock title="Status">
-            <div className="flex flex-col items-start gap-1.5">
-              <StatusPill status="joining" month="Jul" />
-              <StatusPill status="leave" month="Aug" />
-              <StatusPill status="departing" month="Jul" />
-              <StatusPill status="xfer-in" month="Jul" />
-            </div>
-          </LegendBlock>
+          {isManager && (
+            <LegendBlock title="Status">
+              <div className="flex flex-col items-start gap-1.5">
+                <StatusPill status="joining" month="Jul" />
+                <StatusPill status="leave" month="Aug" />
+                <StatusPill status="departing" month="Jul" />
+                <StatusPill status="xfer-in" month="Jul" />
+              </div>
+            </LegendBlock>
+          )}
 
           <LegendBlock title="Specialty">
             <ul className="space-y-1.5">

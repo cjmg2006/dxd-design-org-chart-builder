@@ -5,6 +5,7 @@ import { managerCandidates, managerOf, peersOf, reportsOf, menteesOf } from '@/d
 import { useOrgEditsContext } from '@/data/orgEdits'
 import { DOMAIN_LABEL, DOMAIN_ORDER, WORKSTREAMS_BY_DOMAIN } from '@/data/constants'
 import { useProfile, useProfileViewer } from '@/data/profileViewer'
+import { useManagerAuth } from '@/data/managerAuth'
 import { cn } from '@/lib/cn'
 import { SpecialtyIcon } from './SpecialtyIcon'
 import { Avatar, DomainDot, StatusPill } from './primitives'
@@ -79,6 +80,7 @@ function DetailBody({
   // snapshot we were handed if the person isn't in the derived maps.
   const live = liveOf(org, person.name) ?? person
   const profile = useProfile(live)
+  const { isManager } = useManagerAuth()
   const isRoot = live.name === org.root.name
 
   const manager = managerOf(org, live)
@@ -137,7 +139,7 @@ function DetailBody({
         </Dialog.Close>
       </div>
 
-      {live.status && (
+      {live.status && isManager && (
         <div className="mt-3">
           <StatusPill status={live.status} month={live.statusMonth} />
         </div>
@@ -251,7 +253,7 @@ function DetailBody({
         </p>
       )}
 
-      {live.remarks && (
+      {live.remarks && isManager && (
         <div className="mt-4 rounded-card bg-surface-2 p-3 text-sm text-ink-secondary">
           <span className="font-semibold text-ink-secondary">Note: </span>
           {live.remarks}

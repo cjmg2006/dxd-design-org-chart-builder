@@ -19,6 +19,7 @@ import { statusShort } from '@/lib/styles'
 import { PersonCard } from '@/components/PersonCard'
 import { Avatar, DomainDot, EmploymentBadge, StatusPill } from '@/components/primitives'
 import { useProfile } from '@/data/profileViewer'
+import { useManagerAuth } from '@/data/managerAuth'
 import { SpecialtyIcon } from '@/components/SpecialtyIcon'
 import { cn } from '@/lib/cn'
 import {
@@ -1172,6 +1173,7 @@ function OutlineNode({
   const isDim = dimmed(person, query, domain, filtering)
   const count = descendantCount(org, person.name)
   const profile = useProfile(person)
+  const { isManager } = useManagerAuth()
 
   // Indent by depth, capped so deep branches still fit at 360px.
   const indent = Math.min(depth, 5) * 14
@@ -1209,7 +1211,7 @@ function OutlineNode({
             type="button"
             onClick={() => onSelect(person)}
             aria-label={`${person.name}${person.specialty ? `, ${person.specialty}` : ''}${
-              person.status ? `, ${statusShort(person.status)}` : ''
+              person.status && isManager ? `, ${statusShort(person.status)}` : ''
             }. View details.`}
             className="flex min-h-12 min-w-0 flex-1 items-center gap-2.5 py-2 pr-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
@@ -1229,7 +1231,7 @@ function OutlineNode({
                   <span className="truncate">{person.specialty}</span>
                 </span>
               )}
-              {person.status && (
+              {person.status && isManager && (
                 <span className="mt-1 flex">
                   <StatusPill status={person.status} month={person.statusMonth} />
                 </span>
