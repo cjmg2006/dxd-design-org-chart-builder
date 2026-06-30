@@ -59,7 +59,7 @@ export function PersonCard({
 
       {/* Status pill — only when present; the single loudest thing on the card */}
       {person.status && !isGhost && (
-        <StatusPill status={person.status} month={person.statusMonth} />
+        <StatusPill status={person.status} month={person.statusMonth} destination={person.statusDestination} />
       )}
       {isGhost && (
         <span className="inline-flex items-center gap-1 self-start rounded-pill border border-transfer-border bg-surface px-2 py-0.5 text-2xs font-semibold text-transfer-text">

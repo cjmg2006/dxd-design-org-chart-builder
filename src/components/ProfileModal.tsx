@@ -1,24 +1,27 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { Dialog } from '@base-ui-components/react/dialog'
-import type { Person, ProfileOverride } from '@/data/types'
+import type { Domain, Org, Person, PersonStatus, ProfileOverride } from '@/data/types'
 import { type ProfilePhoto } from '@/data/profiles'
 import { useProfile } from '@/data/profileViewer'
 import { useOrgEditsContext } from '@/data/orgEdits'
+import { managerCandidates, managerOf } from '@/data/org'
+import { DOMAIN_LABEL, DOMAIN_ORDER, WORKSTREAMS_BY_DOMAIN } from '@/data/constants'
 import { saveProfilePhoto } from '@/data/sharedStore'
 import { resizeImageToDataUrl } from '@/lib/image'
 import { EMPLOYMENT_LABEL } from '@/lib/styles'
 import { cn } from '@/lib/cn'
-import { Avatar, DomainDot } from './primitives'
+import { Avatar, DomainDot, StatusPill } from './primitives'
 
 interface ProfileModalProps {
   person: Person | null
+  org: Org
   onClose: () => void
 }
 
 /** The full "colleague, friend, human" profile — a roomy modal housing the rich
  *  content (photo, personality, working style, links, gallery). Opened from a
  *  card's photo or the detail dialog; anyone can edit it + upload a photo in-app. */
-export function ProfileModal({ person, onClose }: ProfileModalProps) {
+export function ProfileModal({ person, org, onClose }: ProfileModalProps) {
   // `editing` lives here (not in the body) so the dialog can refuse an accidental
   // backdrop/Esc dismiss while an edit is in progress — a stray click must not
   // discard staged edits. Closing is reset to read mode for the next open.
@@ -53,6 +56,7 @@ export function ProfileModal({ person, onClose }: ProfileModalProps) {
               <ProfileEditor
                 key={person.name}
                 person={person}
+                org={org}
                 onDone={(saved) => {
                   savedRef.current = !!saved
                   setEditing(false)
@@ -62,6 +66,7 @@ export function ProfileModal({ person, onClose }: ProfileModalProps) {
               <ProfileView
                 key={person.name}
                 person={person}
+                org={org}
                 onEdit={() => setEditing(true)}
                 focusEdit={savedRef.current}
                 onFocused={() => {
@@ -79,16 +84,21 @@ export function ProfileModal({ person, onClose }: ProfileModalProps) {
 
 function ProfileView({
   person,
+  org,
   onEdit,
   focusEdit,
   onFocused,
 }: {
   person: Person
+  org: Org
   onEdit: () => void
   focusEdit?: boolean
   onFocused?: () => void
 }) {
   const profile = useProfile(person)
+  // Resolve the live (override-applied) record so the org details reflect edits.
+  const live = org.byName.get(person.name) ?? org.openRoles.find((p) => p.name === person.name) ?? person
+  const manager = managerOf(org, live)
   // After a Save returns here, move focus to the Edit button (A11Y-11) instead
   // of letting it fall to <body> when the editor unmounts.
   const editRef = useRef<HTMLButtonElement>(null)
@@ -173,6 +183,37 @@ function ProfileView({
               </div>
             )}
           </div>
+        </div>
+
+        {/* Org details — the structural facts. Read-only here; edited via "Edit profile". */}
+        <div className="mt-6 rounded-card border border-border bg-surface-2/40 p-4">
+          <h3 className="mb-3 text-2xs font-semibold text-ink-muted">Org details</h3>
+          {live.status && (
+            <div className="mb-3">
+              <StatusPill status={live.status} month={live.statusMonth} destination={live.statusDestination} />
+            </div>
+          )}
+          <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-2 text-sm">
+            <dt className="text-ink-muted">Reports to</dt>
+            <dd className="text-ink">{manager ? manager.name : 'Top of chart'}</dd>
+            <dt className="text-ink-muted">Domain</dt>
+            <dd className="inline-flex items-center gap-1.5 text-ink">
+              <DomainDot domain={live.domain} />
+              {live.domain}
+            </dd>
+            {live.workstreams.trim() && (
+              <>
+                <dt className="text-ink-muted">Product</dt>
+                <dd className="text-ink">{live.workstreams}</dd>
+              </>
+            )}
+            {live.team && live.team !== '-' && (
+              <>
+                <dt className="text-ink-muted">Squad</dt>
+                <dd className="text-ink">{live.team}</dd>
+              </>
+            )}
+          </dl>
         </div>
 
         {profile && (profile.specialisedIn?.length || profile.contributions?.length) ? (
@@ -267,10 +308,32 @@ const EDIT_SECTIONS: { key: ListKey; title: string }[] = [
   ...VIEW_SECTIONS,
 ]
 
-function ProfileEditor({ person, onDone }: { person: Person; onDone: (saved?: boolean) => void }) {
+function ProfileEditor({ person, org, onDone }: { person: Person; org: Org; onDone: (saved?: boolean) => void }) {
   const profile = useProfile(person)
-  const { edits, setProfile } = useOrgEditsContext()
+  const { edits, baseOrg, setProfile, reparent, setDomain, setWorkstream, setSquad, setStatus } = useOrgEditsContext()
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Live (override-applied) record + the sheet baseline, for the org-detail editors.
+  const live = org.byName.get(person.name) ?? org.openRoles.find((p) => p.name === person.name) ?? person
+  const base = baseOrg
+    ? baseOrg.byName.get(person.name) ?? baseOrg.openRoles.find((p) => p.name === person.name)
+    : undefined
+  const isRoot = live.name === org.root.name
+  const baseManager = base?.managerName ?? live.managerName ?? ''
+  const baseDomain = base?.domain ?? live.domain
+  const baseWorkstreams = (base?.workstreams ?? live.workstreams).trim()
+  const baseTeamRaw = base?.team ?? live.team
+  const baseTeam = baseTeamRaw && baseTeamRaw !== '-' ? baseTeamRaw : ''
+  const liveSquad = live.team && live.team !== '-' ? live.team : ''
+  const [orgForm, setOrgForm] = useState(() => ({
+    managerName: live.managerName ?? '',
+    domain: live.domain,
+    product: live.workstreams.trim(),
+    squad: liveSquad,
+    status: (live.status ?? '') as Exclude<PersonStatus, null> | '',
+    statusMonth: live.statusMonth ?? '',
+    statusDestination: live.statusDestination ?? '',
+  }))
 
   const lines = (a?: string[]) => (a ?? []).join('\n')
   const [form, setForm] = useState<Form>(() => ({
@@ -362,6 +425,32 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: (saved?: bo
       if (photo !== undefined) override.photo = photo
       if (photoV !== undefined) override.photoV = photoV
       setProfile(person.name, override)
+
+      // Commit the org-detail edits — only the fields that actually changed, so an
+      // untouched field doesn't spawn a spurious history entry or override.
+      if (!isRoot) {
+        if (orgForm.managerName !== (live.managerName ?? '')) reparent(person.name, orgForm.managerName, baseManager)
+        if (orgForm.domain !== live.domain) setDomain(person.name, orgForm.domain, baseDomain)
+        if (orgForm.product !== live.workstreams.trim()) setWorkstream(person.name, orgForm.product, baseWorkstreams)
+        if (orgForm.squad.trim() !== liveSquad.trim()) setSquad(person.name, orgForm.squad.trim(), baseTeam)
+      }
+      const liveStatus = (live.status ?? '') as Exclude<PersonStatus, null> | ''
+      const statusChanged =
+        orgForm.status !== liveStatus ||
+        orgForm.statusMonth.trim() !== (live.statusMonth ?? '').trim() ||
+        orgForm.statusDestination.trim() !== (live.statusDestination ?? '').trim()
+      if (statusChanged) {
+        setStatus(
+          person.name,
+          orgForm.status === ''
+            ? null
+            : {
+                status: orgForm.status,
+                month: orgForm.statusMonth.trim(),
+                destination: orgForm.statusDestination.trim(),
+              },
+        )
+      }
       onDone(true)
     } catch {
       setError("Couldn't save the photo — the shared store may be unreachable. Try again.")
@@ -438,7 +527,7 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: (saved?: bo
           <div className="min-w-0 flex-1 self-stretch">
             <div className="font-display text-2xl text-ink">{person.name}</div>
             <p className="mt-0.5 text-2xs text-ink-muted">
-              Name, domain &amp; reporting line are set from the org chart — edit those from the card’s detail dialog.
+              Name comes from the org chart; everything else — including the org details below — is editable here and shared with the team.
             </p>
             <div className="mt-3 grid grid-cols-1 gap-3">
               <Field label="Job title">
@@ -463,6 +552,98 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: (saved?: bo
           </div>
         </div>
 
+        {/* Org details — structural fields. Staged here and applied on Save, so
+            Cancel discards them just like the profile content. */}
+        {!isRoot && (
+          <div className="mt-6 grid grid-cols-1 gap-4 rounded-card border border-border bg-surface-2/40 p-4 sm:grid-cols-2">
+            <Field label="Reports to">
+              <select
+                className={SELECT}
+                value={orgForm.managerName}
+                onChange={(e) => setOrgForm((f) => ({ ...f, managerName: e.target.value }))}
+              >
+                {managerCandidates(org, person.name).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Domain">
+              <select
+                className={SELECT}
+                value={orgForm.domain}
+                onChange={(e) => setOrgForm((f) => ({ ...f, domain: e.target.value as Domain, product: '' }))}
+              >
+                {DOMAIN_ORDER.map((d) => (
+                  <option key={d} value={d}>
+                    {DOMAIN_LABEL[d]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Product">
+              <select
+                className={SELECT}
+                value={orgForm.product}
+                onChange={(e) => setOrgForm((f) => ({ ...f, product: e.target.value }))}
+              >
+                <option value="">No product</option>
+                {(WORKSTREAMS_BY_DOMAIN[orgForm.domain] ?? []).map((ws) => (
+                  <option key={ws} value={ws}>
+                    {ws}
+                  </option>
+                ))}
+                {orgForm.product && !(WORKSTREAMS_BY_DOMAIN[orgForm.domain] ?? []).includes(orgForm.product) && (
+                  <option value={orgForm.product}>{orgForm.product}</option>
+                )}
+              </select>
+            </Field>
+            <Field label="Squad">
+              <input
+                className={INPUT}
+                value={orgForm.squad}
+                onChange={(e) => setOrgForm((f) => ({ ...f, squad: e.target.value }))}
+                placeholder="e.g. ESTL"
+              />
+            </Field>
+            <Field label="Status">
+              <select
+                className={SELECT}
+                value={orgForm.status}
+                onChange={(e) => setOrgForm((f) => ({ ...f, status: e.target.value as Exclude<PersonStatus, null> | '' }))}
+              >
+                <option value="">No status</option>
+                <option value="joining">Joining</option>
+                <option value="leave">On leave</option>
+                <option value="departing">Departing</option>
+                <option value="xfer-in">Transferring in</option>
+                <option value="xfer-out">Transferring out</option>
+              </select>
+            </Field>
+            {orgForm.status && (
+              <Field label="When" hint="e.g. Jul, or blank for TBD">
+                <input
+                  className={INPUT}
+                  value={orgForm.statusMonth}
+                  onChange={(e) => setOrgForm((f) => ({ ...f, statusMonth: e.target.value }))}
+                  placeholder="Jul"
+                />
+              </Field>
+            )}
+            {(orgForm.status === 'xfer-in' || orgForm.status === 'xfer-out' || orgForm.status === 'departing') && (
+              <Field label="Destination" hint="Where they're headed">
+                <input
+                  className={INPUT}
+                  value={orgForm.statusDestination}
+                  onChange={(e) => setOrgForm((f) => ({ ...f, statusDestination: e.target.value }))}
+                  placeholder="e.g. Parent Gateway"
+                />
+              </Field>
+            )}
+          </div>
+        )}
+
         <div className="mt-6 grid grid-cols-1 gap-4 rounded-card bg-surface-2/60 p-4">
           <Field label="Specialised in" hint="One per line">
             <textarea className={TEXTAREA} value={tags.specialisedIn} onChange={(e) => setTags((t) => ({ ...t, specialisedIn: e.target.value }))} placeholder={'UX design\nUI design'} />
@@ -486,6 +667,8 @@ function ProfileEditor({ person, onDone }: { person: Person; onDone: (saved?: bo
 
 const INPUT =
   'min-h-11 w-full rounded-chip border border-border bg-surface px-2.5 text-sm text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-9'
+const SELECT =
+  'min-h-11 w-full rounded-chip border border-border bg-surface px-2.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-9'
 const TEXTAREA =
   'min-h-[4.5rem] w-full rounded-chip border border-border bg-surface px-2.5 py-2 text-sm leading-relaxed text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary'
 

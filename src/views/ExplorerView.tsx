@@ -192,7 +192,7 @@ function PersonRow({
         )}
       </span>
       {person.status ? (
-        <StatusPill status={person.status} month={person.statusMonth} />
+        <StatusPill status={person.status} month={person.statusMonth} destination={person.statusDestination} />
       ) : (
         <DomainDot domain={person.domain} />
       )}
@@ -240,7 +240,7 @@ function FocusPanel({
 
       {person.status && (
         <div className="mt-4">
-          <StatusPill status={person.status} month={person.statusMonth} />
+          <StatusPill status={person.status} month={person.statusMonth} destination={person.statusDestination} />
         </div>
       )}
 

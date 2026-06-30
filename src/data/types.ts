@@ -62,6 +62,9 @@ export interface Person {
   status: PersonStatus
   /** Month label parsed from remarks for a status, e.g. "Jul". */
   statusMonth: string
+  /** Where a transfer / departure is headed, e.g. "Parent Gateway". Override-only
+   *  (not parsed from the sheet); empty/absent for most people. */
+  statusDestination?: string
   remarks: string
   /** True for open-role placeholders (names like "[Senior PD]"). */
   isOpenRole: boolean
@@ -142,6 +145,17 @@ export interface ProfileOverride {
   portfolio?: string
 }
 
+/** An override of a person's status badge — state, timing, and (for transfers /
+ *  departures) where they're headed. When present it wins over the status parsed
+ *  from the sheet remarks. A null `status` explicitly clears the badge. */
+export interface StatusOverride {
+  status: PersonStatus
+  /** Month label, e.g. "Jul" ('' / 'TBD' render as "date TBD"). */
+  month?: string
+  /** Destination, e.g. "Parent Gateway" (shown for transfers / departures). */
+  destination?: string
+}
+
 /** User overrides applied on top of the sheet-derived org, persisted per browser.
  *  Only customised people are stored; everyone else falls back to the sheet. */
 export interface OrgEdits {
@@ -153,6 +167,10 @@ export interface OrgEdits {
   domains: Record<string, Domain>
   /** Re-product people: name → new workstream string ('' clears the product). */
   workstreams: Record<string, string>
+  /** Re-squadded people: name → new squad/team string ('' clears the squad). */
+  teams: Record<string, string>
+  /** Status-badge overrides (state / timing / destination), keyed by name. */
+  statuses: Record<string, StatusOverride>
   /** People the user added by hand, keyed by name. */
   additions: Record<string, AddedPerson>
   /** Sheet people hidden from the chart (added people are dropped outright instead). */

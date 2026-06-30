@@ -201,7 +201,7 @@ export default function App() {
               onClose={() => setAddOpen(false)}
             />
             <HistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
-            <ProfileModal person={profilePerson} onClose={() => setProfilePerson(null)} />
+            <ProfileModal person={profilePerson} org={effectiveOrg} onClose={() => setProfilePerson(null)} />
             </ProfileViewerProvider>
           </OrgEditsProvider>
         )}

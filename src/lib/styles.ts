@@ -90,19 +90,27 @@ export const STATUS_STYLE: Record<Exclude<PersonStatus, null>, StatusStyle> = {
   },
 }
 
-export function statusLabel(status: Exclude<PersonStatus, null>, month: string): string {
-  const m = month && month !== 'TBD' ? month : 'date TBD'
+export function statusLabel(
+  status: Exclude<PersonStatus, null>,
+  month: string,
+  destination?: string,
+): string {
+  const m = month && month !== 'TBD' ? month : ''
+  const dest = (destination ?? '').trim()
+  // Show the date when it's set; fall back to "date TBD" only when nothing else
+  // (a destination) is carrying the badge.
+  const tail = m ? ` · ${m}` : dest ? '' : ' · date TBD'
   switch (status) {
     case 'leave':
-      return `On leave · until ${m}`
+      return `On leave · until ${m || 'date TBD'}`
     case 'joining':
-      return `Joining · ${m}`
+      return `Joining${tail}`
     case 'departing':
-      return `Departing · ${m}`
+      return `Departing${dest ? ` → ${dest}` : ''}${tail}`
     case 'xfer-in':
-      return `Transferring in · ${m}`
+      return `Transferring in${dest ? ` ← ${dest}` : ''}${tail}`
     case 'xfer-out':
-      return `Transferring out · ${m}`
+      return `Transferring out${dest ? ` → ${dest}` : ''}${tail}`
   }
 }
 
