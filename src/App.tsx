@@ -3,6 +3,7 @@ import { useOrg } from './data/useOrg'
 import { applyEdits } from './data/org'
 import { OrgEditsProvider, useOrgEdits } from './data/orgEdits'
 import { ProfileViewerProvider } from './data/profileViewer'
+import { LeadershipViewProvider } from './data/leadershipView'
 import { ManagerAuthProvider, useManagerAuthState } from './data/managerAuth'
 import { ManagerAuthDialog } from './components/ManagerAuthDialog'
 import type { Person } from './data/types'
@@ -16,6 +17,8 @@ import { PersonDetail } from './components/PersonDetail'
 import { ProfileModal } from './components/ProfileModal'
 import { AddPersonDialog } from './components/AddPersonDialog'
 import { HistoryDialog } from './components/HistoryDialog'
+import { CommandPalette, type Command } from './components/CommandPalette'
+import { LeadershipSummary } from './components/LeadershipSummary'
 import { DirectoryView } from './views/DirectoryView'
 import { TreeView } from './views/TreeView'
 import { ExplorerView } from './views/ExplorerView'
@@ -71,6 +74,12 @@ export default function App() {
   const [addOpen, setAddOpen] = useState(false)
   const [addManager, setAddManager] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  // Leadership view: an opt-in lens reached via ⌘K. Off on load (deliberately
+  // reached only through the palette). `announce` carries the polite live-region
+  // message on toggle (A11Y-11: announced, no focus steal).
+  const [leadershipOn, setLeadershipOn] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [announce, setAnnounce] = useState('')
 
   const openAdd = useCallback((managerName?: string) => {
     setAddManager(managerName ?? null)
@@ -82,6 +91,43 @@ export default function App() {
     setProfilePerson(person)
   }, [])
   const profileViewerValue = useMemo(() => ({ openProfile }), [openProfile])
+  const leadershipValue = useMemo(() => ({ on: leadershipOn }), [leadershipOn])
+
+  const toggleLeadership = useCallback(() => {
+    setLeadershipOn((on) => {
+      const next = !on
+      setAnnounce(next ? 'Leadership view on. Employment details shown.' : 'Leadership view off.')
+      return next
+    })
+  }, [])
+
+  // The palette's commands. One for now (the leadership-view toggle); built so more
+  // can be added later.
+  const commands = useMemo<Command[]>(
+    () => [
+      {
+        id: 'leadership-view',
+        label: leadershipOn ? 'Exit leadership view' : 'Switch to leadership view',
+        description: leadershipOn
+          ? 'Hide the employment tags and the team summary'
+          : 'Show employment tags and a summary of the team’s make-up',
+        run: toggleLeadership,
+      },
+    ],
+    [leadershipOn, toggleLeadership],
+  )
+
+  // ⌘K / Ctrl+K toggles the command palette from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault()
+        setPaletteOpen((o) => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Deep-link: resolve ?person once the org has loaded (using the slug captured
   // on mount, so the URL-sync effect below can't wipe it first).
@@ -128,6 +174,13 @@ export default function App() {
       >
         Skip to team
       </a>
+
+      {/* Polite announcement for the leadership-view toggle (A11Y-11) — no focus steal. */}
+      <div aria-live="polite" className="sr-only">
+        {announce}
+      </div>
+
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={commands} />
 
       <header className="sticky top-0 z-30 border-b border-border bg-surface/95 backdrop-blur">
         <div className={cn('px-4 py-3 sm:px-6', !wide && 'mx-auto max-w-[88rem]')}>
@@ -178,6 +231,7 @@ export default function App() {
         {status === 'success' && effectiveOrg && (
           <OrgEditsProvider value={editsValue}>
             <ProfileViewerProvider value={profileViewerValue}>
+            <LeadershipViewProvider value={leadershipValue}>
             <ManagerAuthProvider value={managerAuth}>
             <div className={cn('mb-5', !wide && 'mx-auto max-w-[88rem]')}>
               <Legend
@@ -191,6 +245,11 @@ export default function App() {
                 }
               />
             </div>
+            {leadershipOn && (
+              <div className={cn('mb-5', !wide && 'mx-auto max-w-[88rem]')}>
+                <LeadershipSummary org={effectiveOrg} onExit={toggleLeadership} />
+              </div>
+            )}
             <div className={cn(!wide && 'mx-auto max-w-[88rem]')}>
               <ViewComponent
                 org={effectiveOrg}
@@ -225,6 +284,7 @@ export default function App() {
             />
             <ManagerAuthDialog open={managerDialogOpen} onClose={() => setManagerDialogOpen(false)} />
             </ManagerAuthProvider>
+            </LeadershipViewProvider>
             </ProfileViewerProvider>
           </OrgEditsProvider>
         )}
