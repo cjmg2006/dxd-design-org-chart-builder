@@ -189,10 +189,6 @@ export default function App() {
               person={selected}
               onClose={() => setSelected(null)}
               onNavigate={(p) => setSelected(p)}
-              onAddReport={(managerName) => {
-                setSelected(null) // hand off to the add form rather than stacking dialogs
-                openAdd(managerName)
-              }}
             />
             <AddPersonDialog
               org={effectiveOrg}
@@ -201,7 +197,15 @@ export default function App() {
               onClose={() => setAddOpen(false)}
             />
             <HistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
-            <ProfileModal person={profilePerson} org={effectiveOrg} onClose={() => setProfilePerson(null)} />
+            <ProfileModal
+              person={profilePerson}
+              org={effectiveOrg}
+              onClose={() => setProfilePerson(null)}
+              onAddReport={(managerName) => {
+                setProfilePerson(null) // hand off to the add form rather than stacking dialogs
+                openAdd(managerName)
+              }}
+            />
             </ProfileViewerProvider>
           </OrgEditsProvider>
         )}
