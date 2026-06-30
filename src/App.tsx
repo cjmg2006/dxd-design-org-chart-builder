@@ -4,6 +4,8 @@ import { applyEdits } from './data/org'
 import { OrgEditsProvider, useOrgEdits } from './data/orgEdits'
 import { ProfileViewerProvider } from './data/profileViewer'
 import { LeadershipViewProvider } from './data/leadershipView'
+import { ManagerAuthProvider, useManagerAuthState } from './data/managerAuth'
+import { ManagerAuthDialog } from './components/ManagerAuthDialog'
 import type { Person } from './data/types'
 import { isMatch, type DomainFilter as DomainFilterValue, type ViewProps } from './lib/filter'
 import { cn } from './lib/cn'
@@ -48,6 +50,8 @@ export default function App() {
   // between the edit canvas and the detail dialog and baked into one effective
   // org so every view reflects them.
   const editsApi = useOrgEdits()
+  const managerAuth = useManagerAuthState()
+  const [managerDialogOpen, setManagerDialogOpen] = useState(false)
   const effectiveOrg = useMemo(
     () => (org ? applyEdits(org, editsApi.edits) : null),
     [org, editsApi.edits],
@@ -204,6 +208,18 @@ export default function App() {
                   <Segmented value={view} onChange={setView} options={VIEW_OPTIONS} ariaLabel="Choose a layout" />
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => (managerAuth.isManager ? managerAuth.lock() : setManagerDialogOpen(true))}
+                className={cn(
+                  'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-chip border px-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary',
+                  managerAuth.isManager
+                    ? 'border-primary bg-primary/10 text-primary hover:bg-primary/15'
+                    : 'border-border bg-surface text-ink-secondary hover:border-border-strong hover:text-ink',
+                )}
+              >
+                {managerAuth.isManager ? 'Manager view · Lock' : 'Unlock manager view'}
+              </button>
             </div>
           </div>
         </div>
@@ -216,6 +232,7 @@ export default function App() {
           <OrgEditsProvider value={editsValue}>
             <ProfileViewerProvider value={profileViewerValue}>
             <LeadershipViewProvider value={leadershipValue}>
+            <ManagerAuthProvider value={managerAuth}>
             <div className={cn('mb-5', !wide && 'mx-auto max-w-[88rem]')}>
               <Legend
                 leading={
@@ -265,6 +282,8 @@ export default function App() {
                 openAdd(managerName)
               }}
             />
+            <ManagerAuthDialog open={managerDialogOpen} onClose={() => setManagerDialogOpen(false)} />
+            </ManagerAuthProvider>
             </LeadershipViewProvider>
             </ProfileViewerProvider>
           </OrgEditsProvider>

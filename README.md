@@ -44,6 +44,12 @@ Two Vercel Functions back it: [`api/edits.ts`](api/edits.ts) (the shared `OrgEdi
 
 No env vars are needed for local development (the Vite dev middleware uses the local file store).
 
+## Manager view
+
+Status notes (joining, on leave, departing, transfers) are hidden from the public chart and only shown once unlocked with a shared manager password (the "Unlock manager view" button in the header). The password is checked server-side by [`api/manager-auth.ts`](api/manager-auth.ts) and never shipped in the browser bundle; a successful check returns a short-lived opaque token (stored in `sessionStorage`, expires after 1 day) rather than the password itself.
+
+Set **`MANAGER_PASSWORD`** as an env var in the Vercel project settings (Settings → Environment Variables) and redeploy. For local development, set it in `.env.local` before running `npm run dev` — the Vite dev middleware reads it the same way.
+
 ## Deployment
 
 Deployed on Vercel. Vercel auto-detects the Vite build (output `dist/`) and serves the `api/` directory as serverless functions — no extra config.

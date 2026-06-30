@@ -8,6 +8,7 @@ import { DOMAIN_STYLE, EMPLOYMENT_LABEL } from '@/lib/styles'
 import { Avatar, DomainDot, EmploymentBadge, StatusPill, WsChip } from '@/components/primitives'
 import { useProfile, useProfileViewer } from '@/data/profileViewer'
 import { useLeadershipView } from '@/data/leadershipView'
+import { useManagerAuth } from '@/data/managerAuth'
 import { SpecialtyIcon } from '@/components/SpecialtyIcon'
 import { cn } from '@/lib/cn'
 
@@ -170,6 +171,7 @@ function PersonRow({
 }) {
   const profile = useProfile(person)
   const { on: leadershipOn } = useLeadershipView()
+  const { isManager } = useManagerAuth()
   return (
     <button
       type="button"
@@ -193,7 +195,7 @@ function PersonRow({
           </span>
         )}
       </span>
-      {person.status ? (
+      {person.status && isManager ? (
         <StatusPill status={person.status} month={person.statusMonth} destination={person.statusDestination} />
       ) : (
         <DomainDot domain={person.domain} />
@@ -219,6 +221,7 @@ function FocusPanel({
   const peers = peersOf(org, person)
   const profile = useProfile(person)
   const { openProfile } = useProfileViewer()
+  const { isManager } = useManagerAuth()
 
   const hasSpecialty = person.specialty && person.specialty !== '-'
 
@@ -241,7 +244,7 @@ function FocusPanel({
         </div>
       </div>
 
-      {person.status && (
+      {person.status && isManager && (
         <div className="mt-4">
           <StatusPill status={person.status} month={person.statusMonth} destination={person.statusDestination} />
         </div>
@@ -295,7 +298,7 @@ function FocusPanel({
         <RelatedGroup label={`Peers (${peers.length})`} people={peers} onNavigate={onNavigate} />
       )}
 
-      {person.remarks && (
+      {person.remarks && isManager && (
         <div className="mt-5 rounded-card bg-surface-2 p-3 text-sm text-ink-secondary">
           <span className="font-semibold text-ink-secondary">Note: </span>
           {person.remarks}

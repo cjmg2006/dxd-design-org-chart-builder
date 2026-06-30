@@ -6,6 +6,7 @@ import { managerOf, peersOf, reportsOf, menteesOf } from '@/data/org'
 import { useOrgEditsContext } from '@/data/orgEdits'
 import { DOMAIN_LABEL } from '@/data/constants'
 import { useProfile, useProfileViewer } from '@/data/profileViewer'
+import { useManagerAuth } from '@/data/managerAuth'
 import { cn } from '@/lib/cn'
 import { SpecialtyIcon } from './SpecialtyIcon'
 import { Avatar, DomainDot, StatusPill } from './primitives'
@@ -81,6 +82,7 @@ function DetailBody({
   // snapshot we were handed if the person isn't in the derived maps.
   const live = liveOf(org, person.name) ?? person
   const profile = useProfile(live)
+  const { isManager } = useManagerAuth()
   const isRoot = live.name === org.root.name
 
   const manager = managerOf(org, live)
@@ -117,7 +119,7 @@ function DetailBody({
             </span>
           </Dialog.Description>
         </div>
-        {!isRoot && (
+        {!isRoot && isManager && (
           <Menu.Root>
             <Menu.Trigger
               aria-label="Person actions"
@@ -190,7 +192,7 @@ function DetailBody({
         </div>
       )}
 
-      {live.status && (
+      {live.status && isManager && (
         <div className="mt-3">
           <StatusPill status={live.status} month={live.statusMonth} destination={live.statusDestination} />
         </div>
@@ -241,13 +243,12 @@ function DetailBody({
         <RelatedGroup label={`Peers (${peers.length})`} people={peers} onNavigate={onNavigate} />
       )}
 
-      {live.remarks && (
+      {live.remarks && isManager && (
         <div className="mt-4 rounded-card bg-surface-2 p-3 text-sm text-ink-secondary">
           <span className="font-semibold text-ink-secondary">Note: </span>
           {live.remarks}
         </div>
       )}
-
     </div>
   )
 }
