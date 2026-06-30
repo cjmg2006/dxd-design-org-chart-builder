@@ -163,7 +163,7 @@ function DetailBody({
         <dl className="mt-4 grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm">
           <Fact label="Reports to">Top of chart</Fact>
         </dl>
-      ) : (
+      ) : isManager ? (
         <dl className="mt-4 grid grid-cols-[5.5rem_1fr] items-center gap-x-3 gap-y-2.5 text-sm">
           <FieldRow label="Reports to" changed={live.managerName !== baseManager}>
             <select
@@ -222,9 +222,18 @@ function DetailBody({
 
           {live.team && live.team !== '-' && <Fact label="Squad">{live.team}</Fact>}
         </dl>
+      ) : (
+        // Read-only for non-managers — reparenting / domain / product are
+        // layout edits, gated behind manager view.
+        <dl className="mt-4 grid grid-cols-[5.5rem_1fr] items-center gap-x-3 gap-y-2.5 text-sm">
+          {live.managerName && <Fact label="Reports to">{live.managerName}</Fact>}
+          <Fact label="Domain">{DOMAIN_LABEL[live.domain]}</Fact>
+          {currentWorkstream && <Fact label="Product">{currentWorkstream}</Fact>}
+          {live.team && live.team !== '-' && <Fact label="Squad">{live.team}</Fact>}
+        </dl>
       )}
 
-      {onAddReport && (
+      {isManager && onAddReport && (
         <button
           type="button"
           onClick={() => onAddReport(live.name)}
@@ -247,7 +256,7 @@ function DetailBody({
         <RelatedGroup label={`Peers (${peers.length})`} people={peers} onNavigate={onNavigate} />
       )}
 
-      {!isRoot && manager && (
+      {!isRoot && manager && isManager && (
         <p className="mt-3 text-2xs text-ink-muted">
           Changes here are saved to your view and shown across the chart.
         </p>
@@ -262,7 +271,7 @@ function DetailBody({
 
       {/* Destructive: remove from the chart. Two-step confirm (CMP-2). The root
           has no manager to promote anyone to, so it can't be removed. */}
-      {!isRoot && (
+      {!isRoot && isManager && (
         <div className="mt-4 border-t border-border pt-3">
           {confirmingRemove ? (
             <div className="rounded-card border border-leave-border bg-leave-soft p-3">

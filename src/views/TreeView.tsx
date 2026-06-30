@@ -130,6 +130,12 @@ function TreeCanvas({
   // shared with the detail dialog via the app-wide edits store.
   const [editing, setEditing] = useState(false)
   const { edits, baseOrg, commitNode, reparent, reset, hasEdits } = useOrgEditsContext()
+  const { isManager } = useManagerAuth()
+  // Layout edits are a manager-only capability — drop out of edit mode if the
+  // manager session locks (or never existed) while it was open.
+  useEffect(() => {
+    if (!isManager) setEditing(false)
+  }, [isManager])
   // Drag math converts pointer pixels → content units, so it needs the live scale.
   const getScale = useCallback(() => view.current.scale, [])
 
@@ -394,14 +400,16 @@ function TreeCanvas({
         onToggleMax={toggleMax}
       />
 
-      <EditToolbar
-        editing={editing}
-        canReset={hasEdits}
-        onToggle={() => setEditing((v) => !v)}
-        onReset={reset}
-        onAdd={onAddPerson ? () => onAddPerson() : undefined}
-        onHistory={onOpenHistory}
-      />
+      {isManager && (
+        <EditToolbar
+          editing={editing}
+          canReset={hasEdits}
+          onToggle={() => setEditing((v) => !v)}
+          onReset={reset}
+          onAdd={onAddPerson ? () => onAddPerson() : undefined}
+          onHistory={onOpenHistory}
+        />
+      )}
       <p className="pointer-events-none absolute right-3 top-12 text-2xs text-ink-muted">
         {editing
           ? 'Drag to rearrange · hover a card for + to add a report'
