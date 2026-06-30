@@ -77,7 +77,7 @@ export function DirectoryView({ org, query, domain, onSelect }: ViewProps) {
                 {d.groups.map((g) => (
                   <div key={g.key}>
                     {g.key !== d.domain && (
-                      <h3 className="mb-2 text-2xs font-semibold uppercase tracking-wide text-ink-muted">
+                      <h3 className="mb-2 text-2xs font-semibold text-ink-muted">
                         {g.key}
                       </h3>
                     )}
@@ -137,7 +137,7 @@ function LeadershipSpine({
 }) {
   return (
     <section aria-labelledby="leadership" className={cn(dimmed && 'opacity-60')}>
-      <h2 id="leadership" className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">
+      <h2 id="leadership" className="text-2xs font-semibold text-ink-muted">
         Leadership
       </h2>
       <div className="mt-2 flex flex-wrap items-stretch gap-3">

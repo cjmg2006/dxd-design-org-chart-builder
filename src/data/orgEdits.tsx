@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { AddedPerson, Domain, Org, OrgEdits, ProfileOverride } from './types'
+import type { AddedPerson, Domain, Org, OrgEdits, ProfileOverride, StatusOverride } from './types'
 import { fetchEdits, saveEdits as saveRemote, logHistory } from './sharedStore'
 
 // Custom arrangement, keyed by person name:
@@ -22,6 +22,8 @@ const EMPTY_EDITS: OrgEdits = {
   managers: {},
   domains: {},
   workstreams: {},
+  teams: {},
+  statuses: {},
   additions: {},
   removed: {},
   profiles: {},
@@ -37,6 +39,8 @@ function normalize(d: Partial<OrgEdits> | undefined | null): OrgEdits {
     managers: d?.managers ?? {},
     domains: d?.domains ?? {},
     workstreams: d?.workstreams ?? {},
+    teams: d?.teams ?? {},
+    statuses: d?.statuses ?? {},
     additions: d?.additions ?? {},
     removed: d?.removed ?? {},
     profiles: d?.profiles ?? {},
@@ -78,6 +82,10 @@ export interface OrgEditsApi {
   setDomain: (name: string, newDomain: Domain, originalDomain: Domain) => void
   /** Move a person to a product. Passing their original workstream clears the override. */
   setWorkstream: (name: string, newWorkstream: string, originalWorkstream: string) => void
+  /** Move a person to a squad/team. Passing their original team clears the override. */
+  setSquad: (name: string, newTeam: string, originalTeam: string) => void
+  /** Set (or clear, with null) a person's status badge (state / timing / destination). */
+  setStatus: (name: string, override: StatusOverride | null) => void
   /** Add a hand-entered person (reporting to an existing manager). */
   addPerson: (person: AddedPerson) => void
   /** Remove a person (added → dropped; sheet → hidden). Optionally promote their
@@ -221,6 +229,29 @@ export function useOrgEdits(): OrgEditsApi {
     },
     [note],
   )
+  const setSquad = useCallback(
+    (name: string, newTeam: string, originalTeam: string) => {
+      localChange.current = true
+      const cleared = newTeam.trim() === originalTeam.trim()
+      setEdits((e) => ({
+        ...e,
+        teams: cleared ? without(e.teams, name) : { ...e.teams, [name]: newTeam },
+      }))
+      note('squad', cleared ? `reset ${name}'s squad` : `set ${name}'s squad → ${newTeam || 'none'}`)
+    },
+    [note],
+  )
+  const setStatus = useCallback(
+    (name: string, override: StatusOverride | null) => {
+      localChange.current = true
+      setEdits((e) => ({
+        ...e,
+        statuses: override === null ? without(e.statuses, name) : { ...e.statuses, [name]: override },
+      }))
+      note('status', override === null ? `cleared ${name}'s status` : `set ${name}'s status`)
+    },
+    [note],
+  )
   const addPerson = useCallback(
     (person: AddedPerson) => {
       localChange.current = true
@@ -288,14 +319,16 @@ export function useOrgEdits(): OrgEditsApi {
     Object.keys(edits.managers).length > 0 ||
     Object.keys(edits.domains).length > 0 ||
     Object.keys(edits.workstreams).length > 0 ||
+    Object.keys(edits.teams).length > 0 ||
+    Object.keys(edits.statuses).length > 0 ||
     Object.keys(edits.additions).length > 0 ||
     Object.keys(edits.removed).length > 0
 
   // Stable reference between edits — the callbacks never change, so consumers
   // (the edit canvas, the detail dialog) only re-render when the edits change.
   return useMemo(
-    () => ({ edits, commitNode, reparent, setDomain, setWorkstream, addPerson, removePerson, setProfile, reset, hasEdits }),
-    [edits, commitNode, reparent, setDomain, setWorkstream, addPerson, removePerson, setProfile, reset, hasEdits],
+    () => ({ edits, commitNode, reparent, setDomain, setWorkstream, setSquad, setStatus, addPerson, removePerson, setProfile, reset, hasEdits }),
+    [edits, commitNode, reparent, setDomain, setWorkstream, setSquad, setStatus, addPerson, removePerson, setProfile, reset, hasEdits],
   )
 }
 

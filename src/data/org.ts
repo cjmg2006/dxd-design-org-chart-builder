@@ -114,7 +114,10 @@ export function applyEdits(org: Org, edits: OrgEdits): Org {
     const mgr = edits.managers[p.name]
     const dom = edits.domains[p.name]
     const ws = edits.workstreams[p.name]
-    if (mgr === undefined && dom === undefined && ws === undefined) return p
+    const team = edits.teams[p.name]
+    const st = edits.statuses[p.name]
+    if (mgr === undefined && dom === undefined && ws === undefined && team === undefined && st === undefined)
+      return p
     const next: Person = { ...p }
     if (mgr !== undefined) {
       // A manual line is a hard report (never a mentorship).
@@ -127,6 +130,13 @@ export function applyEdits(org: Org, edits: OrgEdits): Org {
       next.workstreams = ws
       next.workstreamsRaw = ws
       next.workstreamChips = workstreamChips(ws)
+    }
+    if (team !== undefined) next.team = team
+    if (st !== undefined) {
+      // An explicit status edit wins over the one parsed from the sheet remarks.
+      next.status = st.status
+      next.statusMonth = st.month ?? ''
+      next.statusDestination = st.destination ?? ''
     }
     return next
   }

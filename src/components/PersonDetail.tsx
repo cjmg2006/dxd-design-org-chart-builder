@@ -1,9 +1,9 @@
 import { useState, type ReactNode } from 'react'
 import { Dialog } from '@base-ui-components/react/dialog'
-import type { Domain, Org, Person } from '@/data/types'
-import { managerCandidates, managerOf, peersOf, reportsOf, menteesOf } from '@/data/org'
+import type { Org, Person } from '@/data/types'
+import { managerOf, peersOf, reportsOf, menteesOf } from '@/data/org'
 import { useOrgEditsContext } from '@/data/orgEdits'
-import { DOMAIN_LABEL, DOMAIN_ORDER, WORKSTREAMS_BY_DOMAIN } from '@/data/constants'
+import { DOMAIN_LABEL } from '@/data/constants'
 import { useProfile, useProfileViewer } from '@/data/profileViewer'
 import { cn } from '@/lib/cn'
 import { SpecialtyIcon } from './SpecialtyIcon'
@@ -72,7 +72,7 @@ function DetailBody({
   onAddReport?: (managerName: string) => void
   onRemoved: () => void
 }) {
-  const { baseOrg, reparent, setDomain, setWorkstream, removePerson } = useOrgEditsContext()
+  const { removePerson } = useOrgEditsContext()
   const { openProfile } = useProfileViewer()
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   // Always render from the live record (overrides applied), falling back to the
@@ -85,18 +85,6 @@ function DetailBody({
   const peers = peersOf(org, live)
   const reports = reportsOf(org, live.name)
   const mentees = menteesOf(org, live.name)
-
-  // Original (sheet) values — selecting one of these clears that override.
-  const base = baseOrg ? liveOf(baseOrg, live.name) : undefined
-  const baseManager = base?.managerName ?? live.managerName ?? null
-  const baseDomain = base?.domain ?? live.domain
-  const baseWorkstreams = (base?.workstreams ?? live.workstreams).trim()
-
-  const currentWorkstream = live.workstreams.trim()
-  const productOptions = WORKSTREAMS_BY_DOMAIN[live.domain] ?? []
-  // Keep an unlisted current value (e.g. a multi-workstream sheet entry) pickable.
-  const extraProduct =
-    currentWorkstream && !productOptions.includes(currentWorkstream) ? currentWorkstream : null
 
   // Remove from the chart. To keep the tree connected, the person's direct
   // reports + mentees are promoted to that person's own manager (one atomic edit
@@ -139,7 +127,7 @@ function DetailBody({
 
       {live.status && (
         <div className="mt-3">
-          <StatusPill status={live.status} month={live.statusMonth} />
+          <StatusPill status={live.status} month={live.statusMonth} destination={live.statusDestination} />
         </div>
       )}
 
@@ -156,70 +144,26 @@ function DetailBody({
       </button>
 
       {isRoot ? (
-        // The synthetic head-of-design sits at the top of the chart and isn't
-        // assigned a product — show the facts read-only.
         <dl className="mt-4 grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm">
           <Fact label="Reports to">Top of chart</Fact>
         </dl>
       ) : (
-        <dl className="mt-4 grid grid-cols-[5.5rem_1fr] items-center gap-x-3 gap-y-2.5 text-sm">
-          <FieldRow label="Reports to" changed={live.managerName !== baseManager}>
-            <select
-              aria-label="Reports to"
-              value={live.managerName ?? ''}
-              onChange={(e) => reparent(live.name, e.target.value, baseManager)}
-              className={selectClass(live.managerName !== baseManager)}
-            >
-              {managerCandidates(org, live.name).map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </FieldRow>
-
-          <FieldRow
-            label="Domain"
-            changed={live.domain !== baseDomain}
-            leading={<DomainDot domain={live.domain} />}
-          >
-            <select
-              aria-label="Domain"
-              value={live.domain}
-              onChange={(e) => setDomain(live.name, e.target.value as Domain, baseDomain)}
-              className={selectClass(live.domain !== baseDomain)}
-            >
-              {DOMAIN_ORDER.map((d) => (
-                <option key={d} value={d}>
-                  {DOMAIN_LABEL[d]}
-                </option>
-              ))}
-            </select>
-          </FieldRow>
-
-          <FieldRow label="Product" changed={currentWorkstream !== baseWorkstreams}>
-            <select
-              aria-label="Product"
-              value={currentWorkstream}
-              onChange={(e) => setWorkstream(live.name, e.target.value, baseWorkstreams)}
-              className={selectClass(currentWorkstream !== baseWorkstreams)}
-            >
-              <option value="">No product</option>
-              {productOptions.map((ws) => (
-                <option key={ws} value={ws}>
-                  {ws}
-                </option>
-              ))}
-              {extraProduct && (
-                <option key={extraProduct} value={extraProduct}>
-                  {extraProduct}
-                </option>
-              )}
-            </select>
-          </FieldRow>
-
-          {live.team && live.team !== '-' && <Fact label="Squad">{live.team}</Fact>}
-        </dl>
+        <>
+          <dl className="mt-4 grid grid-cols-[5.5rem_1fr] items-center gap-x-3 gap-y-2.5 text-sm">
+            <Fact label="Reports to">{manager ? manager.name : 'Top of chart'}</Fact>
+            <Fact label="Domain">
+              <span className="inline-flex items-center gap-1.5">
+                <DomainDot domain={live.domain} />
+                {DOMAIN_LABEL[live.domain]}
+              </span>
+            </Fact>
+            {live.workstreams.trim() && <Fact label="Product">{live.workstreams}</Fact>}
+            {live.team && live.team !== '-' && <Fact label="Squad">{live.team}</Fact>}
+          </dl>
+          <p className="mt-2.5 text-2xs text-ink-muted">
+            Reporting line, domain, product, squad &amp; status are edited in the full profile.
+          </p>
+        </>
       )}
 
       {onAddReport && (
@@ -243,12 +187,6 @@ function DetailBody({
       )}
       {peers.length > 0 && (
         <RelatedGroup label={`Peers (${peers.length})`} people={peers} onNavigate={onNavigate} />
-      )}
-
-      {!isRoot && manager && (
-        <p className="mt-3 text-2xs text-ink-muted">
-          Changes here are saved to your view and shown across the chart.
-        </p>
       )}
 
       {live.remarks && (
@@ -309,58 +247,6 @@ function DetailBody({
   )
 }
 
-/** Shared class for the native <select> inside an editable field. */
-function selectClass(changed: boolean): string {
-  return cn(
-    'min-w-0 flex-1 cursor-pointer appearance-none truncate bg-transparent py-2 pr-5 text-sm font-medium outline-none',
-    changed ? 'text-primary-text' : 'text-ink',
-  )
-}
-
-/** A labelled, editable row: the field label, then a bordered control holding an
- *  optional leading adornment, the control itself, and a chevron affordance. */
-function FieldRow({
-  label,
-  changed,
-  leading,
-  children,
-}: {
-  label: string
-  changed: boolean
-  leading?: ReactNode
-  children: ReactNode
-}) {
-  return (
-    <>
-      <dt className="text-sm text-ink-muted">{label}</dt>
-      <dd className="min-w-0">
-        <div
-          className={cn(
-            'flex min-h-11 items-center gap-1.5 rounded-chip border bg-surface px-2.5 transition-colors duration-150 sm:min-h-9',
-            'focus-within:ring-2 focus-within:ring-primary',
-            changed ? 'border-primary/60' : 'border-border',
-          )}
-        >
-          {leading}
-          <div className="relative flex min-w-0 flex-1 items-center">
-            {children}
-            <svg
-              aria-hidden
-              viewBox="0 0 16 16"
-              className="pointer-events-none absolute right-0 size-3 shrink-0 text-ink-muted"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.6}
-            >
-              <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-        </div>
-      </dd>
-    </>
-  )
-}
-
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
@@ -381,7 +267,7 @@ function RelatedGroup({
 }) {
   return (
     <div className="mt-4">
-      <h3 className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">{label}</h3>
+      <h3 className="text-2xs font-semibold text-ink-muted">{label}</h3>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         {people.map((p) => (
           <button

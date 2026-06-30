@@ -123,7 +123,7 @@ function PersonList({
 }) {
   return (
     <div>
-      <p className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">
+      <p className="text-2xs font-semibold text-ink-muted">
         {total} {total === 1 ? 'person' : 'people'}
       </p>
       <div className="mt-3 space-y-6">
@@ -132,7 +132,7 @@ function PersonList({
             <h2
               id={`expl-dom-${bucket.domain}`}
               className={cn(
-                'flex items-center gap-2 text-2xs font-semibold uppercase tracking-wide',
+                'flex items-center gap-2 text-2xs font-semibold',
                 DOMAIN_STYLE[bucket.domain].text,
               )}
             >
@@ -192,7 +192,7 @@ function PersonRow({
         )}
       </span>
       {person.status ? (
-        <StatusPill status={person.status} month={person.statusMonth} />
+        <StatusPill status={person.status} month={person.statusMonth} destination={person.statusDestination} />
       ) : (
         <DomainDot domain={person.domain} />
       )}
@@ -240,7 +240,7 @@ function FocusPanel({
 
       {person.status && (
         <div className="mt-4">
-          <StatusPill status={person.status} month={person.statusMonth} />
+          <StatusPill status={person.status} month={person.statusMonth} destination={person.statusDestination} />
         </div>
       )}
 
@@ -335,7 +335,7 @@ function RelatedGroup({
 }) {
   return (
     <div className="mt-5">
-      <h3 className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">{label}</h3>
+      <h3 className="text-2xs font-semibold text-ink-muted">{label}</h3>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {people.map((p) => (
           <PersonChip key={p.name} person={p} onNavigate={onNavigate} />

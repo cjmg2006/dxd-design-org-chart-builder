@@ -7,6 +7,8 @@ export interface SegOption<T extends string> {
   value: T
   label: string
   icon?: React.ReactNode
+  /** Optional one-line hint, surfaced as the native hover tooltip. */
+  description?: string
 }
 
 /** Single-select segmented control (Base UI ToggleGroup, multiple=false). */
@@ -35,6 +37,7 @@ export function Segmented<T extends string>({
         <Toggle
           key={o.value}
           value={o.value}
+          title={o.description}
           className={cn(
             'inline-flex min-h-11 items-center gap-1.5 rounded-pill px-3 py-2 text-xs font-medium text-ink-secondary sm:min-h-9',
             'transition-colors duration-150 hover:text-ink',

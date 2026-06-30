@@ -104,10 +104,12 @@ export function WsChip({ chip }: { chip: WorkstreamChip }) {
 export function StatusPill({
   status,
   month,
+  destination,
   className,
 }: {
   status: Exclude<PersonStatus, null>
   month: string
+  destination?: string
   className?: string
 }) {
   const s = STATUS_STYLE[status]
@@ -122,7 +124,7 @@ export function StatusPill({
       )}
     >
       <span aria-hidden className={cn('size-1.5 rounded-pill', s.dot)} />
-      {statusLabel(status, month)}
+      {statusLabel(status, month, destination)}
     </span>
   )
 }
