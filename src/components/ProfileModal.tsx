@@ -16,12 +16,14 @@ interface ProfileModalProps {
   person: Person | null
   org: Org
   onClose: () => void
+  /** Open the add-a-person form, pre-filled to report to this person. */
+  onAddReport?: (name: string) => void
 }
 
 /** The full "colleague, friend, human" profile — a roomy modal housing the rich
  *  content (photo, personality, working style, links, gallery). Opened from a
  *  card's photo or the detail dialog; anyone can edit it + upload a photo in-app. */
-export function ProfileModal({ person, org, onClose }: ProfileModalProps) {
+export function ProfileModal({ person, org, onClose, onAddReport }: ProfileModalProps) {
   // `editing` lives here (not in the body) so the dialog can refuse an accidental
   // backdrop/Esc dismiss while an edit is in progress — a stray click must not
   // discard staged edits. Closing is reset to read mode for the next open.
@@ -67,6 +69,7 @@ export function ProfileModal({ person, org, onClose }: ProfileModalProps) {
                 key={person.name}
                 person={person}
                 org={org}
+                onAddReport={onAddReport}
                 onEdit={() => setEditing(true)}
                 focusEdit={savedRef.current}
                 onFocused={() => {
@@ -85,12 +88,14 @@ export function ProfileModal({ person, org, onClose }: ProfileModalProps) {
 function ProfileView({
   person,
   org,
+  onAddReport,
   onEdit,
   focusEdit,
   onFocused,
 }: {
   person: Person
   org: Org
+  onAddReport?: (name: string) => void
   onEdit: () => void
   focusEdit?: boolean
   onFocused?: () => void
@@ -186,7 +191,7 @@ function ProfileView({
         </div>
 
         {/* Org details — the structural facts. Read-only here; edited via "Edit profile". */}
-        <div className="mt-6 rounded-card border border-border bg-surface-2/40 p-4">
+        <div className="mt-6 rounded-card bg-surface-2/60 p-4">
           <h3 className="mb-3 text-2xs font-semibold text-ink-muted">Org details</h3>
           {live.status && (
             <div className="mb-3">
@@ -215,6 +220,19 @@ function ProfileView({
             )}
           </dl>
         </div>
+
+        {onAddReport && (
+          <button
+            type="button"
+            onClick={() => onAddReport(person.name)}
+            className="mt-3 inline-flex min-h-11 items-center gap-1.5 rounded-chip border border-border bg-surface px-3 text-sm font-medium text-ink-secondary hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-9"
+          >
+            <svg aria-hidden viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.8}>
+              <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+            </svg>
+            Add a report to {person.name.split(' ')[0]}
+          </button>
+        )}
 
         {profile && (profile.specialisedIn?.length || profile.contributions?.length) ? (
           <div className="mt-6 space-y-3 rounded-card bg-surface-2/60 p-4">
@@ -555,10 +573,9 @@ function ProfileEditor({ person, org, onDone }: { person: Person; org: Org; onDo
         {/* Org details — structural fields. Staged here and applied on Save, so
             Cancel discards them just like the profile content. */}
         {!isRoot && (
-          <div className="mt-6 grid grid-cols-1 gap-4 rounded-card border border-border bg-surface-2/40 p-4 sm:grid-cols-2">
+          <div className="mt-6 grid grid-cols-1 gap-4 rounded-card bg-surface-2/60 p-4 sm:grid-cols-2">
             <Field label="Reports to">
-              <select
-                className={SELECT}
+              <SelectBox
                 value={orgForm.managerName}
                 onChange={(e) => setOrgForm((f) => ({ ...f, managerName: e.target.value }))}
               >
@@ -567,11 +584,10 @@ function ProfileEditor({ person, org, onDone }: { person: Person; org: Org; onDo
                     {n}
                   </option>
                 ))}
-              </select>
+              </SelectBox>
             </Field>
             <Field label="Domain">
-              <select
-                className={SELECT}
+              <SelectBox
                 value={orgForm.domain}
                 onChange={(e) => setOrgForm((f) => ({ ...f, domain: e.target.value as Domain, product: '' }))}
               >
@@ -580,11 +596,10 @@ function ProfileEditor({ person, org, onDone }: { person: Person; org: Org; onDo
                     {DOMAIN_LABEL[d]}
                   </option>
                 ))}
-              </select>
+              </SelectBox>
             </Field>
             <Field label="Product">
-              <select
-                className={SELECT}
+              <SelectBox
                 value={orgForm.product}
                 onChange={(e) => setOrgForm((f) => ({ ...f, product: e.target.value }))}
               >
@@ -597,7 +612,7 @@ function ProfileEditor({ person, org, onDone }: { person: Person; org: Org; onDo
                 {orgForm.product && !(WORKSTREAMS_BY_DOMAIN[orgForm.domain] ?? []).includes(orgForm.product) && (
                   <option value={orgForm.product}>{orgForm.product}</option>
                 )}
-              </select>
+              </SelectBox>
             </Field>
             <Field label="Squad">
               <input
@@ -607,9 +622,8 @@ function ProfileEditor({ person, org, onDone }: { person: Person; org: Org; onDo
                 placeholder="e.g. ESTL"
               />
             </Field>
-            <Field label="Status">
-              <select
-                className={SELECT}
+            <Field label="Status" className={orgForm.status ? undefined : 'sm:col-span-2'}>
+              <SelectBox
                 value={orgForm.status}
                 onChange={(e) => setOrgForm((f) => ({ ...f, status: e.target.value as Exclude<PersonStatus, null> | '' }))}
               >
@@ -619,7 +633,7 @@ function ProfileEditor({ person, org, onDone }: { person: Person; org: Org; onDo
                 <option value="departing">Departing</option>
                 <option value="xfer-in">Transferring in</option>
                 <option value="xfer-out">Transferring out</option>
-              </select>
+              </SelectBox>
             </Field>
             {orgForm.status && (
               <Field label="When" hint="e.g. Jul, or blank for TBD">
@@ -632,7 +646,7 @@ function ProfileEditor({ person, org, onDone }: { person: Person; org: Org; onDo
               </Field>
             )}
             {(orgForm.status === 'xfer-in' || orgForm.status === 'xfer-out' || orgForm.status === 'departing') && (
-              <Field label="Destination" hint="Where they're headed">
+              <Field label="Destination" hint="Where they're headed" className="sm:col-span-2">
                 <input
                   className={INPUT}
                   value={orgForm.statusDestination}
@@ -667,20 +681,52 @@ function ProfileEditor({ person, org, onDone }: { person: Person; org: Org; onDo
 
 const INPUT =
   'min-h-11 w-full rounded-chip border border-border bg-surface px-2.5 text-sm text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-9'
-const SELECT =
-  'min-h-11 w-full rounded-chip border border-border bg-surface px-2.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-9'
 const TEXTAREA =
   'min-h-[4.5rem] w-full rounded-chip border border-border bg-surface px-2.5 py-2 text-sm leading-relaxed text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary'
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+function Field({ label, hint, children, className }: { label: string; hint?: string; children: ReactNode; className?: string }) {
   return (
-    <label className="block">
+    <label className={cn('block', className)}>
       <span className="flex items-baseline justify-between gap-2">
         <span className="text-2xs font-semibold text-ink-muted">{label}</span>
         {hint && <span className="text-2xs text-ink-muted">{hint}</span>}
       </span>
       <span className="mt-1.5 block">{children}</span>
     </label>
+  )
+}
+
+/** A native <select> styled to match INPUT — appearance reset + an overlaid
+ *  chevron — so dropdowns read consistently with the rest of the form. */
+function SelectBox({
+  value,
+  onChange,
+  children,
+}: {
+  value: string
+  onChange: (e: ChangeEvent<HTMLSelectElement>) => void
+  children: ReactNode
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={onChange}
+        className="min-h-11 w-full appearance-none rounded-chip border border-border bg-surface pl-2.5 pr-8 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-9"
+      >
+        {children}
+      </select>
+      <svg
+        aria-hidden
+        viewBox="0 0 16 16"
+        className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-muted"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.6}
+      >
+        <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </div>
   )
 }
 
