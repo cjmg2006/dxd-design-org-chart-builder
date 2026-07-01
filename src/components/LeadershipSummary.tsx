@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { Domain, EmploymentType, Org, SpecialtyKind } from '@/data/types'
 import { DOMAIN_ORDER, DOMAIN_LABEL } from '@/data/constants'
 import { EMPLOYMENT_LABEL } from '@/lib/styles'
+import { cn } from '@/lib/cn'
 
 /** The numbers a design lead tracks, derived from the whole team (not the active
  *  search/domain filter, so the overview stays stable). Counts run over the filled
@@ -86,10 +87,7 @@ export function LeadershipSummary({ org, onExit }: { org: Org; onExit: () => voi
           <h2 id="leadership-summary-heading" className="font-display text-base font-semibold text-ink">
             Team overview
           </h2>
-          <p className="mt-0.5 text-xs text-ink-muted">
-            Team make-up across the whole org. You’re in manager view — employment tags and status
-            notes show on the cards.
-          </p>
+          <p className="mt-0.5 text-xs text-ink-muted">Team make-up across the whole org.</p>
         </div>
         <button
           type="button"
@@ -100,15 +98,20 @@ export function LeadershipSummary({ org, onExit }: { org: Org; onExit: () => voi
         </button>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-x-8 gap-y-5">
-        {groups.map((group) => (
-          <div key={group.label} className="min-w-0">
-            <div className="text-2xs font-semibold text-ink-muted">{group.label}</div>
-            <ul className="mt-1.5 flex flex-wrap items-baseline gap-x-4 gap-y-1.5">
+      <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-6 border-t border-border pt-4 min-[360px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+        {groups.map((group, i) => (
+          <div
+            key={group.label}
+            className={cn('min-w-0', i > 0 && 'lg:border-l lg:border-border lg:pl-6')}
+          >
+            <h3 className="text-xs font-semibold text-ink">{group.label}</h3>
+            <ul className="mt-2 space-y-1.5">
               {group.items.map((it) => (
-                <li key={it.label} className="flex items-baseline gap-1.5">
-                  <span className="text-base font-semibold text-ink tabular">{it.value}</span>
-                  <span className="text-2xs text-ink-secondary">{it.label}</span>
+                <li key={it.label} className="flex items-baseline gap-2">
+                  <span className="w-8 shrink-0 text-right text-base font-semibold text-ink tabular">
+                    {it.value}
+                  </span>
+                  <span className="text-xs text-ink-secondary">{it.label}</span>
                 </li>
               ))}
             </ul>

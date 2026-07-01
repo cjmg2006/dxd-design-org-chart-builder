@@ -210,3 +210,133 @@ fixes above. One pre-existing item logged as a **follow-up, not a new control**:
 `outline-none` with no focus-visible replacement on the edit-mode "Reports to" `<select>`
 (`TreeView.tsx:964`) is an A11Y-2 gap the catalog already covers — to be fixed in a
 separate change, out of scope here.
+
+---
+
+# Update 2026-07-01 — Team overview band restyle (aligned-column ledger)
+
+> Follow-on modification to the summary band above. The band (now titled "Team
+> overview", shown whenever manager view is on after the leadership-lens → manager-view
+> unification) read as a flat wrap of ~27 equally-weighted numbers with no clear
+> group boundaries. This restyle rebuilds the band's layout only; the data
+> (`buildGroups`) and the surrounding manager-view gating are unchanged.
+
+- **Date:** 2026-07-01
+- **Product:** TW surface — DXD Design Team org chart (internal MOE design-org tool)
+- **Change type:** modification (restyle of one component region — `LeadershipSummary.tsx`)
+- **Page type:** dashboard/summary band above the workspace view
+- **Run type:** attended
+- **The person and the moment:** Wondo (design lead) unlocks manager view to read team
+  make-up while planning; the band must be scannable at a glance, not a river of numbers.
+
+## Sprint contract (done-criteria)
+
+1. The 5 groups (Team, Employment, Domains, Disciplines, In flux) are unmistakably
+   distinct at a glance at every width (SLP-7).
+2. Stats are scannable — values align in a consistent grid, not an inline wrap; reflow
+   to one column holds with no loss at 320px (LAY-2).
+3. Real hierarchy: group heading anchors → value prominent → label muted; adjacent
+   type steps differentiated (SLP-6).
+4. Less noise: stays one flat card (SLP-4), no identical-card grid (SLP-5), trimmed
+   helper copy, no decorative colour.
+5. Tokens/type/contrast preserved (TOK-1..3, TYP-1..4, A11Y-1); semantic
+   `<section>`/heading/list structure kept (A11Y-7); "Exit to employee view" preserved.
+
+## Chosen approach
+
+**Aligned-column ledger.** Each group becomes a column in a responsive CSS grid
+(`grid-cols-2` → `sm:grid-cols-3` → `lg:grid-cols-5`) with its items stacked vertically
+(right-aligned tabular value + muted label per row). Thin vertical dividers between the
+five columns at `lg` (via per-cell `border-l`, first cell excepted — robust across the
+wrap breakpoints, unlike `divide-x` on a wrapping grid); a full-width divider separates
+the header from the stats. Group headings strengthened as the column anchors. Flat card
+kept; no cards-per-group, no colour coding.
+
+## Rejected options
+
+- **Hero-headline** — big "35 people · 2 open roles" lead + 4 breakdown columns. More
+  focal punch, but treats the Team group specially (inconsistent) and adds complexity;
+  offered to the user, who chose the consistent ledger.
+- **Keep inline, add dividers only** — smallest change, but leaves the inline
+  number-river that is the core scannability defect; rejected.
+
+## Tradeoffs, named
+
+The band gets a little taller than today's compact 2-row wrap, in exchange for being
+scannable. Acceptable: it appears only in manager view and clarity is the whole point.
+
+## Controls in scope
+
+SLP-4, SLP-5, SLP-6, SLP-7 (layout/anti-slop); TOK-1..3, TYP-1..4 (tokens/type);
+A11Y-1 (contrast), A11Y-7 (semantic structure); LAY-2 (320px reflow). No async or
+destructive action on this band → CMP-2/CMP-3 not in scope.
+
+## Waivers granted
+
+None.
+
+## Plan approval
+
+- **Approved by:** Wondo (design lead) — chose the aligned-column ledger option.
+- **Approved on:** 2026-07-01
+
+## Verify verdict
+
+- **Screenshots:** `scratchpad/band-new-1280.png`, `band-new-768.png` (evaluated); post-fix
+  `band-fixed-320.png` (single column, band right edge 304px ≤ 320 — fits), `band-fixed-360.png`
+  (2 columns). Before: `band-current-1280.png`.
+- **Dark mode:** N/A — product has no dark mode (light-only tokens).
+- **Deterministic controls:** `token-audit.py` exit 0 (TOK-1..3, COL-1..2); `a11y-static.py`
+  exit 0 (FOCUS/KBD/NAME); `tsc`+`vite build` OK. A11Y-1 contrast + LAY-2 320px verified
+  manually against the rendered DOM.
+- **Evaluator verdict (tfx-design-evaluator, verbatim):**
+
+  > VERDICT: pass-with-findings
+  >
+  > BLOCKING (must fix before ship):
+  > - **LAY-2 (L1)**: The stats grid base is `grid-cols-2` with no single-column floor; at
+  >   320 CSS px it renders two columns, not one. LAY-2 requires single-column reflow with no
+  >   two-dimensional scrolling at 320px, and done-criterion 2 promised a single/narrow column
+  >   at 320. Narrowest capture was 360px. Remedy: add `grid-cols-1` as the base, or run the
+  >   320px reflow test and confirm no horizontal scroll. Blocking until the 320px render is checked.
+  >
+  > ADVISORY: value gutter `w-7` (28px) is close-to-tight for a future 3-digit count (`w-8`/min-w
+  > safer); vertical dividers exist only at `lg` — groups still read as distinct at 768/360 via
+  > bold headings + spacing (SLP-7 judged met at all widths), noted because the contract said
+  > "every width".
+  >
+  > QUALITY GRADES: Design quality — strong (directly fixes the flat-river critique; five clean
+  > labeled columns, proper heading→value→label hierarchy, aligned tabular values, SLP-7
+  > satisfied). Originality — strong (appropriately restrained ledger). Craft — acceptable (held
+  > back only by the then-unverified 320px behavior and fixed `w-7`). Functionality — strong;
+  > CMP-2/CMP-3 correctly out of scope; the sole control "Exit to employee view" is a native
+  > button with visible label, focus-visible outline, min-h-11/sm:min-h-9 hit area.
+  >
+  > IN-SCOPE CONTROLS: SLP-4 pass (single card, borderless inner cells, no nested cards);
+  > SLP-5 pass (grid columns of a list, not repeated feature cards); SLP-6 pass (16px value vs
+  > 12px heading/label = 1.33x, weight/color separate roles); SLP-7 pass (6px within vs 24px
+  > between); A11Y-7 pass (section→h2→h3→ul, descriptive headings, no skipped level);
+  > A11Y-8 pass (native button, role+name); LAY-2 FAIL (see blocking); TOK-1..3 pass; TYP-1..4
+  > pass (no all-caps, on-scale, Jakarta/Inter); A11Y-1 pass-with-caveat (tokens annotated AA;
+  > recommend a rendered contrast scan).
+  >
+  > UNCOVERED: None — every issue maps to an in-scope control.
+  >
+  > Overall: needs-fixes before ship — one blocking item (LAY-2). The restyle is a genuine,
+  > well-crafted improvement that resolves the stated critique and passes every anti-slop, token,
+  > type, and semantic-structure control.
+
+- **Resolution of the blocker (post-verdict):** Applied the evaluator's remedy in full — base
+  set to `grid-cols-1 min-[360px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5`, **and** ran the
+  320px reflow test. At 320px the grid computes to **1 column** and the band's right edge is
+  304px (fits within 320 with the p-4 gutter). Gutter bumped `w-7 → w-8` (advisory). Re-ran
+  `token-audit`/`a11y-static`/build — all pass. LAY-2 for this surface now **passes**.
+- **Known out-of-scope note:** at 320px the *page* overflows by 1px, sourced to a pre-existing
+  `rounded-pill` chip elsewhere (not the Team overview band, which fits). Left untouched per
+  conservative-defaults; logged as a separate follow-up, not part of this restyle.
+
+## Ratchet
+
+Ratchet: no proposal — nothing uncovered. The evaluator's UNCOVERED list is empty; the sole
+blocker (LAY-2) mapped to an existing control and is resolved with 320px evidence. The 1px
+page-level overflow from a pre-existing pill is a follow-up on that component, not a new control.
