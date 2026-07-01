@@ -1,7 +1,6 @@
 import type { Person } from '@/data/types'
 import { cn } from '@/lib/cn'
 import { useProfile, useProfileViewer } from '@/data/profileViewer'
-import { useLeadershipView } from '@/data/leadershipView'
 import { useManagerAuth } from '@/data/managerAuth'
 import { SpecialtyIcon } from './SpecialtyIcon'
 import { Avatar, DomainDot, EmploymentBadge, StatusPill, WsChip } from './primitives'
@@ -31,11 +30,10 @@ export function PersonCard({
   const isOpen = person.isOpenRole
   const profile = useProfile(person)
   const { openProfile } = useProfileViewer()
-  // Employment tag is hidden by default; the leadership-view lens (⌘K) brings it back.
-  // The synthetic root (incoming Head) is excluded — it isn't in the team counts.
-  const { on: leadershipOn } = useLeadershipView()
-  const showEmployment = leadershipOn && !isGhost && !person.isRoot
   const { isManager } = useManagerAuth()
+  // Employment tag is manager-only. The synthetic root (incoming Head) is excluded
+  // — it isn't in the team counts.
+  const showEmployment = isManager && !isGhost && !person.isRoot
 
   const ariaLabel = isGhost
     ? `${person.name}, transferring in from ${ghostFrom}. View details.`
@@ -112,7 +110,7 @@ export function PersonCard({
         </div>
       )}
 
-      {/* Footer: domain + (in leadership view) employment */}
+      {/* Footer: domain + (in manager view) employment */}
       {((showDomain && !isGhost) || showEmployment) && (
         <div className="mt-auto flex items-center gap-2 pt-0.5">
           {showDomain && !isGhost && (

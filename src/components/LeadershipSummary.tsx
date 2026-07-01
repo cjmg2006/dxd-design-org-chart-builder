@@ -70,8 +70,8 @@ function buildGroups(org: Org): StatGroupData[] {
   ]
 }
 
-/** The leadership-view summary band: a calm, labelled read-out of team make-up,
- *  shown above the active view while the lens is on. One surface, grouped by
+/** The manager-view summary band: a calm, labelled read-out of team make-up,
+ *  shown above the active view while manager view is on. One surface, grouped by
  *  spacing and headings — not a grid of metric tiles. */
 export function LeadershipSummary({ org, onExit }: { org: Org; onExit: () => void }) {
   const groups = useMemo(() => buildGroups(org), [org])
@@ -84,10 +84,11 @@ export function LeadershipSummary({ org, onExit }: { org: Org; onExit: () => voi
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h2 id="leadership-summary-heading" className="font-display text-base font-semibold text-ink">
-            Leadership view
+            Team overview
           </h2>
           <p className="mt-0.5 text-xs text-ink-muted">
-            Team make-up across the whole org. Employment tags show on the cards while this is on.
+            Team make-up across the whole org. You’re in manager view — employment tags and status
+            notes show on the cards.
           </p>
         </div>
         <button
@@ -95,10 +96,7 @@ export function LeadershipSummary({ org, onExit }: { org: Org; onExit: () => voi
           onClick={onExit}
           className="inline-flex min-h-11 shrink-0 items-center gap-1.5 self-start rounded-chip border border-border px-3 py-2 text-xs font-medium text-ink-secondary transition-colors duration-150 hover:border-border-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-9"
         >
-          Exit leadership view
-          <kbd className="rounded-chip border border-border bg-surface-2 px-1 py-px text-2xs font-medium text-ink-muted">
-            ⌘K
-          </kbd>
+          Exit to employee view
         </button>
       </div>
 

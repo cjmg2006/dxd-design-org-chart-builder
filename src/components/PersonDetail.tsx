@@ -114,8 +114,7 @@ function DetailBody({
             )}
             <span>
               {live.specialty && live.specialty !== '-' ? live.specialty : 'Specialty not set'}
-              {' · '}
-              {EMPLOYMENT_LABEL[live.employment]}
+              {isManager && ` · ${EMPLOYMENT_LABEL[live.employment]}`}
             </span>
           </Dialog.Description>
         </div>

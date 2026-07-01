@@ -3,7 +3,6 @@ import { useOrg } from './data/useOrg'
 import { applyEdits } from './data/org'
 import { OrgEditsProvider, useOrgEdits } from './data/orgEdits'
 import { ProfileViewerProvider } from './data/profileViewer'
-import { LeadershipViewProvider } from './data/leadershipView'
 import { ManagerAuthProvider, useManagerAuthState } from './data/managerAuth'
 import { ManagerAuthDialog } from './components/ManagerAuthDialog'
 import type { Person } from './data/types'
@@ -74,10 +73,8 @@ export default function App() {
   const [addOpen, setAddOpen] = useState(false)
   const [addManager, setAddManager] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
-  // Leadership view: an opt-in lens reached via ⌘K. Off on load (deliberately
-  // reached only through the palette). `announce` carries the polite live-region
-  // message on toggle (A11Y-11: announced, no focus steal).
-  const [leadershipOn, setLeadershipOn] = useState(false)
+  // ⌘K command palette (the Employee ↔ Manager view switcher) + a polite
+  // live-region message announced on view switch (A11Y-11: announced, no focus steal).
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [announce, setAnnounce] = useState('')
 
@@ -91,30 +88,48 @@ export default function App() {
     setProfilePerson(person)
   }, [])
   const profileViewerValue = useMemo(() => ({ openProfile }), [openProfile])
-  const leadershipValue = useMemo(() => ({ on: leadershipOn }), [leadershipOn])
 
-  const toggleLeadership = useCallback(() => {
-    setLeadershipOn((on) => {
-      const next = !on
-      setAnnounce(next ? 'Leadership view on. Employment details shown.' : 'Leadership view off.')
-      return next
-    })
-  }, [])
+  const enterManagerView = useCallback(() => {
+    if (!managerAuth.isManager) setManagerDialogOpen(true)
+  }, [managerAuth.isManager])
 
-  // The palette's commands. One for now (the leadership-view toggle); built so more
-  // can be added later.
+  const enterEmployeeView = useCallback(() => {
+    if (managerAuth.isManager) managerAuth.lock()
+  }, [managerAuth])
+
+  // Announce the view switch politely (A11Y-11) whenever manager state flips —
+  // covers the palette, the password dialog, and the header button alike.
+  const prevManager = useRef(managerAuth.isManager)
+  useEffect(() => {
+    if (managerAuth.isManager === prevManager.current) return
+    prevManager.current = managerAuth.isManager
+    setAnnounce(
+      managerAuth.isManager
+        ? 'Manager view on. Employment tags and status notes are shown.'
+        : 'Employee view. Employment tags and status notes are hidden.',
+    )
+  }, [managerAuth.isManager])
+
+  // ⌘K palette: switch between the default Employee view and the password-gated
+  // Manager view. The active view is marked "Current"; the other row switches.
   const commands = useMemo<Command[]>(
     () => [
       {
-        id: 'leadership-view',
-        label: leadershipOn ? 'Exit leadership view' : 'Switch to leadership view',
-        description: leadershipOn
-          ? 'Hide the employment tags and the team summary'
-          : 'Show employment tags and a summary of the team’s make-up',
-        run: toggleLeadership,
+        id: 'employee-view',
+        label: 'Employee view',
+        description: 'Hide employment tags, status notes, and editing',
+        hint: managerAuth.isManager ? undefined : 'Current',
+        run: enterEmployeeView,
+      },
+      {
+        id: 'manager-view',
+        label: 'Manager view',
+        description: 'Show employment tags, status notes, and editing',
+        hint: managerAuth.isManager ? 'Current' : 'Password',
+        run: enterManagerView,
       },
     ],
-    [leadershipOn, toggleLeadership],
+    [managerAuth.isManager, enterEmployeeView, enterManagerView],
   )
 
   // ⌘K / Ctrl+K toggles the command palette from anywhere.
@@ -175,7 +190,7 @@ export default function App() {
         Skip to team
       </a>
 
-      {/* Polite announcement for the leadership-view toggle (A11Y-11) — no focus steal. */}
+      {/* Polite announcement for the view switch (A11Y-11) — no focus steal. */}
       <div aria-live="polite" className="sr-only">
         {announce}
       </div>
@@ -231,7 +246,6 @@ export default function App() {
         {status === 'success' && effectiveOrg && (
           <OrgEditsProvider value={editsValue}>
             <ProfileViewerProvider value={profileViewerValue}>
-            <LeadershipViewProvider value={leadershipValue}>
             <ManagerAuthProvider value={managerAuth}>
             <div className={cn('mb-5', !wide && 'mx-auto max-w-[88rem]')}>
               <Legend
@@ -245,9 +259,9 @@ export default function App() {
                 }
               />
             </div>
-            {leadershipOn && (
+            {managerAuth.isManager && (
               <div className={cn('mb-5', !wide && 'mx-auto max-w-[88rem]')}>
-                <LeadershipSummary org={effectiveOrg} onExit={toggleLeadership} />
+                <LeadershipSummary org={effectiveOrg} onExit={managerAuth.lock} />
               </div>
             )}
             <div className={cn(!wide && 'mx-auto max-w-[88rem]')}>
@@ -284,7 +298,6 @@ export default function App() {
             />
             <ManagerAuthDialog open={managerDialogOpen} onClose={() => setManagerDialogOpen(false)} />
             </ManagerAuthProvider>
-            </LeadershipViewProvider>
             </ProfileViewerProvider>
           </OrgEditsProvider>
         )}
