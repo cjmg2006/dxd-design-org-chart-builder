@@ -223,18 +223,7 @@ export default function App() {
                   <Segmented value={view} onChange={setView} options={VIEW_OPTIONS} ariaLabel="Choose a layout" />
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => (managerAuth.isManager ? managerAuth.lock() : setManagerDialogOpen(true))}
-                className={cn(
-                  'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-chip border px-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary',
-                  managerAuth.isManager
-                    ? 'border-primary bg-primary/10 text-primary hover:bg-primary/15'
-                    : 'border-border bg-surface text-ink-secondary hover:border-border-strong hover:text-ink',
-                )}
-              >
-                {managerAuth.isManager ? 'Manager view · Lock' : 'Unlock manager view'}
-              </button>
+              {/* Employee ↔ Manager view is reached via ⌘K (CommandPalette) — no header button. */}
             </div>
           </div>
         </div>
