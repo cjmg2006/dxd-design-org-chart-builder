@@ -3,6 +3,7 @@ import { Dialog } from '@base-ui-components/react/dialog'
 import type { Domain, Org, Person, PersonStatus, ProfileOverride } from '@/data/types'
 import { type ProfilePhoto } from '@/data/profiles'
 import { useProfile } from '@/data/profileViewer'
+import { useManagerAuth } from '@/data/managerAuth'
 import { useOrgEditsContext } from '@/data/orgEdits'
 import { managerCandidates, managerOf } from '@/data/org'
 import { DOMAIN_LABEL, DOMAIN_ORDER, WORKSTREAMS_BY_DOMAIN } from '@/data/constants'
@@ -101,6 +102,7 @@ function ProfileView({
   onFocused?: () => void
 }) {
   const profile = useProfile(person)
+  const { isManager } = useManagerAuth()
   // Resolve the live (override-applied) record so the org details reflect edits.
   const live = org.byName.get(person.name) ?? org.openRoles.find((p) => p.name === person.name) ?? person
   const manager = managerOf(org, live)
@@ -158,8 +160,12 @@ function ProfileView({
                 <DomainDot domain={person.domain} />
                 {person.domain}
               </span>
-              <Sep />
-              <span>{EMPLOYMENT_LABEL[person.employment]}</span>
+              {isManager && (
+                <>
+                  <Sep />
+                  <span>{EMPLOYMENT_LABEL[person.employment]}</span>
+                </>
+              )}
               {profile?.joined && (
                 <>
                   <Sep />

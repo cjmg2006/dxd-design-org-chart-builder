@@ -70,17 +70,19 @@ export function Legend({ leading }: { leading?: React.ReactNode }) {
             </ul>
           </LegendBlock>
 
-          <LegendBlock title="Employment">
-            <div className="flex flex-wrap gap-1.5">
-              <EmploymentBadge type="GT" />
-              <EmploymentBadge type="AR" />
-              <EmploymentBadge type="Intern" />
-              <EmploymentBadge type="Apprentice" />
-              <EmploymentBadge type="Consultant" />
-              <EmploymentBadge type="TBH" />
-            </div>
-            <p className="mt-2 text-2xs text-ink-muted">GT = GovTech · AR = Augmented Resource</p>
-          </LegendBlock>
+          {isManager && (
+            <LegendBlock title="Employment">
+              <div className="flex flex-wrap gap-1.5">
+                <EmploymentBadge type="GT" />
+                <EmploymentBadge type="AR" />
+                <EmploymentBadge type="Intern" />
+                <EmploymentBadge type="Apprentice" />
+                <EmploymentBadge type="Consultant" />
+                <EmploymentBadge type="TBH" />
+              </div>
+              <p className="mt-2 text-2xs text-ink-muted">GT = GovTech · AR = Augmented Resource</p>
+            </LegendBlock>
+          )}
         </div>
       </Collapsible.Panel>
     </Collapsible.Root>

@@ -57,7 +57,8 @@ export function ManagerAuthDialog({ open, onClose }: ManagerAuthDialogProps) {
         >
           <Dialog.Title className="font-display text-xl text-ink">Manager view</Dialog.Title>
           <Dialog.Description className="mt-0.5 text-sm text-ink-secondary">
-            Enter the manager password to see status notes (leave, joining, departing, transfers).
+            Enter the manager password to see employment tags and status notes (leave, joining,
+            departing, transfers).
           </Dialog.Description>
 
           <form onSubmit={handleSubmit} className="mt-4">
